@@ -1,0 +1,12 @@
+// storage.rules
+// Deploy with: firebase deploy --only storage
+
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /receipts/{allPaths=**} {
+      // Open for development — lock down with auth for production
+      allow read, write: if true;
+    }
+  }
+}

@@ -1,0 +1,195 @@
+// src/pages/Products.jsx
+import { useEffect, useState } from 'react'
+import { getAllProducts, createProduct, addAliasToProduct } from '../lib/db'
+import { Package, Plus, Tag } from 'lucide-react'
+import { useToast } from '../hooks/useToast'
+
+export default function Products() {
+  const toast = useToast()
+  const [products, setProducts] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [showCreate, setShowCreate] = useState(false)
+  const [newName, setNewName] = useState('')
+  const [newCategory, setNewCategory] = useState('')
+  const [newAlias, setNewAlias] = useState('')
+  const [filter, setFilter] = useState('')
+
+  // Per-product alias adding
+  const [addingAliasFor, setAddingAliasFor] = useState(null)
+  const [aliasInput, setAliasInput] = useState('')
+
+  async function load() {
+    const p = await getAllProducts()
+    setProducts(p.sort((a, b) => a.name.localeCompare(b.name)))
+    setLoading(false)
+  }
+
+  useEffect(() => { load() }, [])
+
+  async function handleCreate() {
+    if (!newName.trim()) return
+    try {
+      await createProduct({
+        name: newName.trim(),
+        category: newCategory.trim(),
+        aliases: newAlias ? [newAlias.trim()] : [],
+      })
+      toast('Product created!')
+      setNewName(''); setNewCategory(''); setNewAlias('')
+      setShowCreate(false)
+      load()
+    } catch (e) {
+      toast('Failed: ' + e.message, 'error')
+    }
+  }
+
+  async function handleAddAlias(productId) {
+    if (!aliasInput.trim()) return
+    try {
+      await addAliasToProduct(productId, aliasInput.trim())
+      toast('Alias added!')
+      setAddingAliasFor(null)
+      setAliasInput('')
+      load()
+    } catch (e) {
+      toast('Failed: ' + e.message, 'error')
+    }
+  }
+
+  const filtered = products.filter(p =>
+    !filter ||
+    p.name.toLowerCase().includes(filter.toLowerCase()) ||
+    p.category?.toLowerCase().includes(filter.toLowerCase()) ||
+    (p.aliases || []).some(a => a.toLowerCase().includes(filter.toLowerCase()))
+  )
+
+  const categories = [...new Set(products.map(p => p.category).filter(Boolean))].sort()
+
+  if (loading) return (
+    <div style={{ textAlign: 'center', padding: 80 }}>
+      <div className="spinner" style={{ width: 36, height: 36, borderWidth: 3, margin: '0 auto 16px' }} />
+    </div>
+  )
+
+  return (
+    <div className="animate-fade">
+      <div className="page-header">
+        <h2>Products</h2>
+        <p>Manage your product catalog and receipt abbreviation mappings.</p>
+      </div>
+
+      <div style={{ display: 'flex', gap: 12, marginBottom: 20 }}>
+        <input
+          className="form-input"
+          placeholder="Search products or aliases…"
+          value={filter}
+          onChange={e => setFilter(e.target.value)}
+          style={{ flex: 1, maxWidth: 320 }}
+        />
+        <button className="btn btn-primary" onClick={() => setShowCreate(true)}>
+          <Plus size={16} /> Add Product
+        </button>
+      </div>
+
+      {/* Create modal */}
+      {showCreate && (
+        <div className="modal-overlay">
+          <div className="modal">
+            <h3>New Product</h3>
+            <p style={{ color: 'var(--ink-light)', fontSize: '0.875rem', marginBottom: 20 }}>
+              Add a product to your catalog. You can always add aliases later when receipts are scanned.
+            </p>
+            <div className="form-group">
+              <label className="form-label">Product Name *</label>
+              <input className="form-input" placeholder="e.g. Organic Whole Milk 1 Gallon" value={newName} onChange={e => setNewName(e.target.value)} autoFocus />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Category</label>
+              <input className="form-input" placeholder="e.g. Dairy" list="categories" value={newCategory} onChange={e => setNewCategory(e.target.value)} />
+              <datalist id="categories">
+                {categories.map(c => <option key={c} value={c} />)}
+              </datalist>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Initial Alias (receipt abbreviation)</label>
+              <input className="form-input" placeholder="e.g. ORG WHL MLK" value={newAlias} onChange={e => setNewAlias(e.target.value)} />
+            </div>
+            <div className="modal-actions">
+              <button className="btn btn-ghost" onClick={() => setShowCreate(false)}>Cancel</button>
+              <button className="btn btn-primary" onClick={handleCreate} disabled={!newName.trim()}>Create Product</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {filtered.length === 0 && (
+        <div className="empty-state">
+          <Package size={40} />
+          <h3>No products yet</h3>
+          <p>Products are created automatically when you resolve unknown items on receipts, or you can add them manually.</p>
+        </div>
+      )}
+
+      <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Product</th>
+                <th>Category</th>
+                <th>Aliases (receipt codes)</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map(p => (
+                <tr key={p.id}>
+                  <td>
+                    <strong>{p.name}</strong>
+                  </td>
+                  <td>
+                    {p.category ? <span className="badge badge-gray">{p.category}</span> : <span style={{ color: 'var(--ink-faint)' }}>—</span>}
+                  </td>
+                  <td>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
+                      {(p.aliases || []).map(a => (
+                        <code key={a} style={{ fontSize: '0.72rem', background: 'var(--cream-dark)', padding: '2px 7px', borderRadius: 4, color: 'var(--ink-light)' }}>
+                          {a}
+                        </code>
+                      ))}
+                      {addingAliasFor === p.id ? (
+                        <div style={{ display: 'flex', gap: 4 }}>
+                          <input
+                            className="form-input"
+                            style={{ padding: '3px 8px', fontSize: '0.8rem', width: 140 }}
+                            placeholder="ABBREV"
+                            value={aliasInput}
+                            onChange={e => setAliasInput(e.target.value)}
+                            autoFocus
+                            onKeyDown={e => { if (e.key === 'Enter') handleAddAlias(p.id); if (e.key === 'Escape') { setAddingAliasFor(null); setAliasInput('') } }}
+                          />
+                          <button className="btn btn-primary btn-sm" onClick={() => handleAddAlias(p.id)}>Add</button>
+                          <button className="btn btn-ghost btn-sm" onClick={() => { setAddingAliasFor(null); setAliasInput('') }}>✕</button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => { setAddingAliasFor(p.id); setAliasInput('') }}
+                          style={{ background: 'none', border: '1px dashed var(--border)', borderRadius: 4, padding: '2px 6px', fontSize: '0.7rem', color: 'var(--ink-faint)', cursor: 'pointer' }}
+                        >
+                          + alias
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                  <td>
+                    {/* Future: edit/delete */}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  )
+}
