@@ -1,8 +1,7 @@
-// src/pages/ReceiptLog.jsx
 import { useEffect, useState } from 'react'
 import { getAllReceipts } from '../lib/db'
 import { format } from 'date-fns'
-import { ReceiptText, ChevronDown, ChevronUp, Image } from 'lucide-react'
+import { ReceiptText, ChevronDown, ChevronUp } from 'lucide-react'
 
 function toDate(val) {
   if (!val) return null
@@ -16,12 +15,7 @@ export default function ReceiptLog() {
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('')
 
-  useEffect(() => {
-    getAllReceipts().then(r => {
-      setReceipts(r)
-      setLoading(false)
-    })
-  }, [])
+  useEffect(() => { getAllReceipts().then(r => { setReceipts(r); setLoading(false) }) }, [])
 
   const filtered = receipts.filter(r =>
     !filter || r.storeName?.toLowerCase().includes(filter.toLowerCase()) ||
@@ -31,7 +25,6 @@ export default function ReceiptLog() {
   if (loading) return (
     <div style={{ textAlign: 'center', padding: 80 }}>
       <div className="spinner" style={{ width: 36, height: 36, borderWidth: 3, margin: '0 auto 16px' }} />
-      <p>Loading receipts…</p>
     </div>
   )
 
@@ -43,13 +36,7 @@ export default function ReceiptLog() {
       </div>
 
       <div style={{ marginBottom: 20 }}>
-        <input
-          className="form-input"
-          placeholder="Filter by store or uploader…"
-          value={filter}
-          onChange={e => setFilter(e.target.value)}
-          style={{ maxWidth: 320 }}
-        />
+        <input className="form-input" placeholder="Filter by store or uploader…" value={filter} onChange={e => setFilter(e.target.value)} style={{ maxWidth: 320 }} />
       </div>
 
       {filtered.length === 0 && (
@@ -69,26 +56,12 @@ export default function ReceiptLog() {
 
           return (
             <div key={receipt.id} className="card" style={{ padding: 0, overflow: 'hidden' }}>
-              <button
-                onClick={() => setExpanded(isOpen ? null : receipt.id)}
-                style={{
-                  width: '100%',
-                  padding: '18px 24px',
-                  background: 'none',
-                  border: 'none',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  cursor: 'pointer',
-                  textAlign: 'left',
-                }}
-              >
+              <button onClick={() => setExpanded(isOpen ? null : receipt.id)} style={{
+                width: '100%', padding: '18px 24px', background: 'none', border: 'none',
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', textAlign: 'left',
+              }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                  <div style={{
-                    width: 40, height: 40, borderRadius: 10,
-                    background: 'var(--green-pale)', display: 'flex',
-                    alignItems: 'center', justifyContent: 'center',
-                  }}>
+                  <div style={{ width: 40, height: 40, borderRadius: 10, background: 'var(--green-pale)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                     <ReceiptText size={18} color="var(--green)" />
                   </div>
                   <div>
@@ -98,15 +71,10 @@ export default function ReceiptLog() {
                     </div>
                   </div>
                 </div>
-
                 <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
                   <div style={{ textAlign: 'right' }}>
-                    <div style={{ fontWeight: 700, fontFamily: 'DM Serif Display, serif', fontSize: '1.1rem' }}>
-                      ${total.toFixed(2)}
-                    </div>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--ink-faint)' }}>
-                      {resolvedCount}/{receipt.items?.length || 0} tracked
-                    </div>
+                    <div style={{ fontWeight: 700, fontFamily: 'DM Serif Display, serif', fontSize: '1.1rem' }}>${total.toFixed(2)}</div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--ink-faint)' }}>{resolvedCount}/{receipt.items?.length || 0} tracked</div>
                   </div>
                   {isOpen ? <ChevronUp size={18} color="var(--ink-faint)" /> : <ChevronDown size={18} color="var(--ink-faint)" />}
                 </div>
@@ -114,37 +82,16 @@ export default function ReceiptLog() {
 
               {isOpen && (
                 <div style={{ borderTop: '1px solid var(--cream-dark)', padding: '0 24px 20px' }} className="animate-fade">
-                  {receipt.imageUrl && (
-                    <div style={{ margin: '16px 0', textAlign: 'center' }}>
-                      <a href={receipt.imageUrl} target="_blank" rel="noopener">
-                        <img src={receipt.imageUrl} alt="receipt" style={{ maxHeight: 200, borderRadius: 8, border: '1px solid var(--border)' }} />
-                      </a>
-                    </div>
-                  )}
                   <div className="table-wrap">
                     <table>
                       <thead>
-                        <tr>
-                          <th>Item (raw)</th>
-                          <th>Product</th>
-                          <th>Price</th>
-                          <th>Qty</th>
-                        </tr>
+                        <tr><th>Item (raw)</th><th>Product</th><th>Price</th><th>Qty</th></tr>
                       </thead>
                       <tbody>
                         {(receipt.items || []).map((item, i) => (
                           <tr key={i}>
-                            <td>
-                              <code style={{ fontSize: '0.78rem', background: 'var(--cream-dark)', padding: '2px 6px', borderRadius: 4 }}>
-                                {item.description || item.rawText}
-                              </code>
-                            </td>
-                            <td>
-                              {item.productId
-                                ? <span className="badge badge-green">{item.productName}</span>
-                                : <span className="badge badge-gray">Unknown</span>
-                              }
-                            </td>
+                            <td><code style={{ fontSize: '0.78rem', background: 'var(--cream-dark)', padding: '2px 6px', borderRadius: 4 }}>{item.description || item.rawText}</code></td>
+                            <td>{item.productId ? <span className="badge badge-green">{item.productName}</span> : <span className="badge badge-gray">Unknown</span>}</td>
                             <td>${(item.price || 0).toFixed(2)}</td>
                             <td style={{ color: 'var(--ink-faint)' }}>{item.quantity || 1}</td>
                           </tr>

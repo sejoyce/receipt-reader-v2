@@ -1,7 +1,6 @@
-// src/pages/Products.jsx
 import { useEffect, useState } from 'react'
 import { getAllProducts, createProduct, addAliasToProduct } from '../lib/db'
-import { Package, Plus, Tag } from 'lucide-react'
+import { Package, Plus } from 'lucide-react'
 import { useToast } from '../hooks/useToast'
 
 export default function Products() {
@@ -13,8 +12,6 @@ export default function Products() {
   const [newCategory, setNewCategory] = useState('')
   const [newAlias, setNewAlias] = useState('')
   const [filter, setFilter] = useState('')
-
-  // Per-product alias adding
   const [addingAliasFor, setAddingAliasFor] = useState(null)
   const [aliasInput, setAliasInput] = useState('')
 
@@ -29,18 +26,12 @@ export default function Products() {
   async function handleCreate() {
     if (!newName.trim()) return
     try {
-      await createProduct({
-        name: newName.trim(),
-        category: newCategory.trim(),
-        aliases: newAlias ? [newAlias.trim()] : [],
-      })
+      await createProduct({ name: newName.trim(), category: newCategory.trim(), aliases: newAlias ? [newAlias.trim()] : [] })
       toast('Product created!')
       setNewName(''); setNewCategory(''); setNewAlias('')
       setShowCreate(false)
       load()
-    } catch (e) {
-      toast('Failed: ' + e.message, 'error')
-    }
+    } catch (e) { toast('Failed: ' + e.message, 'error') }
   }
 
   async function handleAddAlias(productId) {
@@ -48,28 +39,20 @@ export default function Products() {
     try {
       await addAliasToProduct(productId, aliasInput.trim())
       toast('Alias added!')
-      setAddingAliasFor(null)
-      setAliasInput('')
+      setAddingAliasFor(null); setAliasInput('')
       load()
-    } catch (e) {
-      toast('Failed: ' + e.message, 'error')
-    }
+    } catch (e) { toast('Failed: ' + e.message, 'error') }
   }
 
   const filtered = products.filter(p =>
-    !filter ||
-    p.name.toLowerCase().includes(filter.toLowerCase()) ||
+    !filter || p.name.toLowerCase().includes(filter.toLowerCase()) ||
     p.category?.toLowerCase().includes(filter.toLowerCase()) ||
     (p.aliases || []).some(a => a.toLowerCase().includes(filter.toLowerCase()))
   )
 
   const categories = [...new Set(products.map(p => p.category).filter(Boolean))].sort()
 
-  if (loading) return (
-    <div style={{ textAlign: 'center', padding: 80 }}>
-      <div className="spinner" style={{ width: 36, height: 36, borderWidth: 3, margin: '0 auto 16px' }} />
-    </div>
-  )
+  if (loading) return <div style={{ textAlign: 'center', padding: 80 }}><div className="spinner" style={{ width: 36, height: 36, borderWidth: 3, margin: '0 auto' }} /></div>
 
   return (
     <div className="animate-fade">
@@ -79,26 +62,15 @@ export default function Products() {
       </div>
 
       <div style={{ display: 'flex', gap: 12, marginBottom: 20 }}>
-        <input
-          className="form-input"
-          placeholder="Search products or aliases…"
-          value={filter}
-          onChange={e => setFilter(e.target.value)}
-          style={{ flex: 1, maxWidth: 320 }}
-        />
-        <button className="btn btn-primary" onClick={() => setShowCreate(true)}>
-          <Plus size={16} /> Add Product
-        </button>
+        <input className="form-input" placeholder="Search products or aliases…" value={filter} onChange={e => setFilter(e.target.value)} style={{ flex: 1, maxWidth: 320 }} />
+        <button className="btn btn-primary" onClick={() => setShowCreate(true)}><Plus size={16} /> Add Product</button>
       </div>
 
-      {/* Create modal */}
       {showCreate && (
         <div className="modal-overlay">
           <div className="modal">
             <h3>New Product</h3>
-            <p style={{ color: 'var(--ink-light)', fontSize: '0.875rem', marginBottom: 20 }}>
-              Add a product to your catalog. You can always add aliases later when receipts are scanned.
-            </p>
+            <p style={{ color: 'var(--ink-light)', fontSize: '0.875rem', marginBottom: 20 }}>Add a product to your catalog. Aliases are added automatically when you scan receipts.</p>
             <div className="form-group">
               <label className="form-label">Product Name *</label>
               <input className="form-input" placeholder="e.g. Organic Whole Milk 1 Gallon" value={newName} onChange={e => setNewName(e.target.value)} autoFocus />
@@ -106,9 +78,7 @@ export default function Products() {
             <div className="form-group">
               <label className="form-label">Category</label>
               <input className="form-input" placeholder="e.g. Dairy" list="categories" value={newCategory} onChange={e => setNewCategory(e.target.value)} />
-              <datalist id="categories">
-                {categories.map(c => <option key={c} value={c} />)}
-              </datalist>
+              <datalist id="categories">{categories.map(c => <option key={c} value={c} />)}</datalist>
             </div>
             <div className="form-group">
               <label className="form-label">Initial Alias (receipt abbreviation)</label>
@@ -126,7 +96,7 @@ export default function Products() {
         <div className="empty-state">
           <Package size={40} />
           <h3>No products yet</h3>
-          <p>Products are created automatically when you resolve unknown items on receipts, or you can add them manually.</p>
+          <p>Products are created when you resolve unknown items on receipts, or add them manually here.</p>
         </div>
       )}
 
@@ -134,28 +104,17 @@ export default function Products() {
         <div className="table-wrap">
           <table>
             <thead>
-              <tr>
-                <th>Product</th>
-                <th>Category</th>
-                <th>Aliases (receipt codes)</th>
-                <th></th>
-              </tr>
+              <tr><th>Product</th><th>Category</th><th>Aliases (receipt codes)</th></tr>
             </thead>
             <tbody>
               {filtered.map(p => (
                 <tr key={p.id}>
-                  <td>
-                    <strong>{p.name}</strong>
-                  </td>
-                  <td>
-                    {p.category ? <span className="badge badge-gray">{p.category}</span> : <span style={{ color: 'var(--ink-faint)' }}>—</span>}
-                  </td>
+                  <td><strong>{p.name}</strong></td>
+                  <td>{p.category ? <span className="badge badge-gray">{p.category}</span> : <span style={{ color: 'var(--ink-faint)' }}>—</span>}</td>
                   <td>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
                       {(p.aliases || []).map(a => (
-                        <code key={a} style={{ fontSize: '0.72rem', background: 'var(--cream-dark)', padding: '2px 7px', borderRadius: 4, color: 'var(--ink-light)' }}>
-                          {a}
-                        </code>
+                        <code key={a} style={{ fontSize: '0.72rem', background: 'var(--cream-dark)', padding: '2px 7px', borderRadius: 4, color: 'var(--ink-light)' }}>{a}</code>
                       ))}
                       {addingAliasFor === p.id ? (
                         <div style={{ display: 'flex', gap: 4 }}>
@@ -166,23 +125,21 @@ export default function Products() {
                             value={aliasInput}
                             onChange={e => setAliasInput(e.target.value)}
                             autoFocus
-                            onKeyDown={e => { if (e.key === 'Enter') handleAddAlias(p.id); if (e.key === 'Escape') { setAddingAliasFor(null); setAliasInput('') } }}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter') handleAddAlias(p.id)
+                              if (e.key === 'Escape') { setAddingAliasFor(null); setAliasInput('') }
+                            }}
                           />
                           <button className="btn btn-primary btn-sm" onClick={() => handleAddAlias(p.id)}>Add</button>
                           <button className="btn btn-ghost btn-sm" onClick={() => { setAddingAliasFor(null); setAliasInput('') }}>✕</button>
                         </div>
                       ) : (
-                        <button
-                          onClick={() => { setAddingAliasFor(p.id); setAliasInput('') }}
-                          style={{ background: 'none', border: '1px dashed var(--border)', borderRadius: 4, padding: '2px 6px', fontSize: '0.7rem', color: 'var(--ink-faint)', cursor: 'pointer' }}
-                        >
+                        <button onClick={() => { setAddingAliasFor(p.id); setAliasInput('') }}
+                          style={{ background: 'none', border: '1px dashed var(--border)', borderRadius: 4, padding: '2px 6px', fontSize: '0.7rem', color: 'var(--ink-faint)', cursor: 'pointer' }}>
                           + alias
                         </button>
                       )}
                     </div>
-                  </td>
-                  <td>
-                    {/* Future: edit/delete */}
                   </td>
                 </tr>
               ))}

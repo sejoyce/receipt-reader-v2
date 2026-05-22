@@ -1,16 +1,13 @@
-// src/components/Sidebar.jsx
 import { NavLink } from 'react-router-dom'
-import {
-  UploadCloud, ReceiptText, BarChart2, ShoppingCart, Sparkles, Package
-} from 'lucide-react'
+import { UploadCloud, ReceiptText, BarChart2, ShoppingCart, Sparkles, Package } from 'lucide-react'
 
 const navItems = [
-  { to: '/',           label: 'Dashboard',      icon: Sparkles },
-  { to: '/upload',     label: 'Upload Receipt', icon: UploadCloud },
-  { to: '/receipts',   label: 'Receipt Log',    icon: ReceiptText },
-  { to: '/compare',    label: 'Compare Prices', icon: BarChart2 },
-  { to: '/products',   label: 'Products',       icon: Package },
-  { to: '/deals',      label: 'Best Deals',     icon: ShoppingCart },
+  { to: '/',         label: 'Dashboard',      icon: Sparkles },
+  { to: '/upload',   label: 'Upload Receipt', icon: UploadCloud },
+  { to: '/receipts', label: 'Receipt Log',    icon: ReceiptText },
+  { to: '/compare',  label: 'Compare Prices', icon: BarChart2 },
+  { to: '/products', label: 'Products',       icon: Package },
+  { to: '/deals',    label: 'Best Deals',     icon: ShoppingCart },
 ]
 
 export default function Sidebar() {

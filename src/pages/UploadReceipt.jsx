@@ -1,13 +1,11 @@
 // src/pages/UploadReceipt.jsx
 import { useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { UploadCloud, ImageIcon, Loader, CheckCircle, AlertCircle } from 'lucide-react'
+import { UploadCloud, CheckCircle, AlertCircle } from 'lucide-react'
 import { extractTextFromImage, parseReceiptText, extractWithClaude } from '../lib/ocr'
 import { findProductByAlias, getOrCreateStore, saveReceipt } from '../lib/db'
 import AliasModal from '../components/AliasModal'
 import { useToast } from '../hooks/useToast'
-
-const STEPS = ['upload', 'processing', 'review', 'saving', 'done']
 
 export default function UploadReceipt() {
   const navigate = useNavigate()
@@ -18,17 +16,13 @@ export default function UploadReceipt() {
   const [imageFile, setImageFile] = useState(null)
   const [imagePreview, setImagePreview] = useState(null)
   const [ocrProgress, setOcrProgress] = useState(0)
-  const [ocrMethod, setOcrMethod] = useState('tesseract') // 'tesseract' | 'claude'
+  const [ocrMethod, setOcrMethod] = useState('tesseract')
 
-  // Receipt metadata
   const [storeName, setStoreName] = useState('')
   const [receiptDate, setReceiptDate] = useState('')
   const [uploadedBy, setUploadedBy] = useState('')
 
-  // Items
   const [items, setItems] = useState([])
-
-  // Alias resolution queue
   const [unknownQueue, setUnknownQueue] = useState([])
   const [currentUnknown, setCurrentUnknown] = useState(null)
 
@@ -59,13 +53,11 @@ export default function UploadReceipt() {
       let detectedDate = receiptDate
 
       if (ocrMethod === 'claude' && import.meta.env.VITE_ANTHROPIC_API_KEY) {
-        // Claude vision path
         const result = await extractWithClaude(imageFile)
         parsedItems = result.items
         if (!detectedStore && result.storeName) detectedStore = result.storeName
         if (!detectedDate && result.date) detectedDate = result.date
       } else {
-        // Tesseract path
         const rawText = await extractTextFromImage(imageFile, setOcrProgress)
         parsedItems = parseReceiptText(rawText)
       }
@@ -73,13 +65,11 @@ export default function UploadReceipt() {
       if (detectedStore) setStoreName(detectedStore)
       if (detectedDate) setReceiptDate(detectedDate)
 
-      // Look up aliases for all items
+      // Resolve known aliases
       const resolved = await Promise.all(
         parsedItems.map(async item => {
           const product = await findProductByAlias(item.description)
-          if (product) {
-            return { ...item, productId: product.id, productName: product.name }
-          }
+          if (product) return { ...item, productId: product.id, productName: product.name }
           return item
         })
       )
@@ -131,21 +121,33 @@ export default function UploadReceipt() {
     setStep('saving')
     try {
       const store = await getOrCreateStore(storeName)
+      // Note: imageFile is intentionally not passed — images are not stored
+      // to keep the app on Firebase's free plan. OCR runs locally and is discarded.
       await saveReceipt({
         storeId: store.id,
         storeName: store.name,
         date: receiptDate || null,
-        imageFile,
         items,
         uploadedBy: uploadedBy || 'unknown',
       })
       setStep('done')
-      toast('Receipt saved successfully!')
+      toast('Receipt saved!')
     } catch (err) {
       console.error(err)
-      toast('Failed to save receipt: ' + err.message, 'error')
+      toast('Failed to save: ' + err.message, 'error')
       setStep('review')
     }
+  }
+
+  function reset() {
+    setStep('upload')
+    setImageFile(null)
+    setImagePreview(null)
+    setItems([])
+    setStoreName('')
+    setReceiptDate('')
+    setUnknownQueue([])
+    setCurrentUnknown(null)
   }
 
   if (step === 'done') {
@@ -154,15 +156,12 @@ export default function UploadReceipt() {
         <CheckCircle size={56} color="var(--green)" style={{ marginBottom: 16 }} />
         <h2 style={{ marginBottom: 8 }}>Receipt saved!</h2>
         <p style={{ color: 'var(--ink-light)', marginBottom: 28 }}>
-          {items.filter(i => i.productId).length} items tracked, {items.filter(i => !i.productId).length} skipped.
+          {items.filter(i => i.productId).length} items tracked
+          {items.filter(i => !i.productId).length > 0 && `, ${items.filter(i => !i.productId).length} skipped`}.
         </p>
         <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }}>
-          <button className="btn btn-secondary" onClick={() => { setStep('upload'); setImageFile(null); setImagePreview(null); setItems([]) }}>
-            Upload another
-          </button>
-          <button className="btn btn-primary" onClick={() => navigate('/compare')}>
-            Compare prices
-          </button>
+          <button className="btn btn-secondary" onClick={reset}>Upload another</button>
+          <button className="btn btn-primary" onClick={() => navigate('/compare')}>Compare prices</button>
         </div>
       </div>
     )
@@ -172,7 +171,7 @@ export default function UploadReceipt() {
     <div className="animate-fade">
       <div className="page-header">
         <h2>Upload Receipt</h2>
-        <p>Snap or upload a receipt and we'll extract the items automatically.</p>
+        <p>Snap or upload a receipt — OCR runs in your browser, nothing is stored except the item data.</p>
       </div>
 
       {/* Step indicators */}
@@ -185,7 +184,8 @@ export default function UploadReceipt() {
           return (
             <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <div style={{
-                width: 24, height: 24, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                width: 24, height: 24, borderRadius: '50%', display: 'flex',
+                alignItems: 'center', justifyContent: 'center',
                 fontSize: '0.7rem', fontWeight: 700,
                 background: done ? 'var(--green)' : active ? 'var(--ink)' : 'var(--border)',
                 color: done || active ? 'white' : 'var(--ink-faint)',
@@ -205,7 +205,6 @@ export default function UploadReceipt() {
       {step === 'upload' && (
         <div className="grid-2" style={{ gap: 24, alignItems: 'start' }}>
           <div>
-            {/* Drop zone */}
             <div
               onDrop={handleDrop}
               onDragOver={e => e.preventDefault()}
@@ -233,15 +232,9 @@ export default function UploadReceipt() {
             </div>
             <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={handleFileChange} style={{ display: 'none' }} />
 
-            {/* OCR method */}
-            <div className="form-group">
-              <label className="form-label">Extraction Method</label>
-              <select className="form-select" value={ocrMethod} onChange={e => setOcrMethod(e.target.value)}>
-                <option value="tesseract">Tesseract OCR (free, local)</option>
-                <option value="claude" disabled={!import.meta.env.VITE_ANTHROPIC_API_KEY}>
-                  Claude Vision (requires API key)
-                </option>
-              </select>
+            {/* Free-tier note */}
+            <div style={{ fontSize: '0.78rem', color: 'var(--ink-faint)', background: 'var(--cream-dark)', borderRadius: 8, padding: '10px 14px' }}>
+              📱 Images are processed locally in your browser and never uploaded — keeping this app 100% on Firebase's free plan.
             </div>
           </div>
 
@@ -259,6 +252,15 @@ export default function UploadReceipt() {
               <div className="form-group">
                 <label className="form-label">Uploaded by</label>
                 <input className="form-input" placeholder="Your name" value={uploadedBy} onChange={e => setUploadedBy(e.target.value)} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Extraction Method</label>
+                <select className="form-select" value={ocrMethod} onChange={e => setOcrMethod(e.target.value)}>
+                  <option value="tesseract">Tesseract OCR (free, local)</option>
+                  <option value="claude" disabled={!import.meta.env.VITE_ANTHROPIC_API_KEY}>
+                    Claude Vision (requires API key)
+                  </option>
+                </select>
               </div>
               <button
                 className="btn btn-primary"
@@ -286,14 +288,13 @@ export default function UploadReceipt() {
               </div>
             </>
           )}
-          {ocrMethod === 'claude' && <p style={{ color: 'var(--ink-light)' }}>Using Claude vision AI…</p>}
+          {ocrMethod === 'claude' && <p style={{ color: 'var(--ink-light)' }}>Using Claude Vision AI…</p>}
         </div>
       )}
 
       {/* Review step */}
       {step === 'review' && (
         <div>
-          {/* Alias modal queue */}
           {currentUnknown && (
             <AliasModal
               unknownItem={currentUnknown}
@@ -322,58 +323,59 @@ export default function UploadReceipt() {
               <div className="empty-state">
                 <AlertCircle size={32} />
                 <h3>No items detected</h3>
-                <p style={{ fontSize: '0.85rem' }}>Try manually adding items or re-upload a clearer image.</p>
+                <p style={{ fontSize: '0.85rem' }}>Try re-uploading a clearer image, or check the store name and date fields.</p>
               </div>
             </div>
           )}
 
-          <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Raw Text</th>
-                    <th>Product</th>
-                    <th>Price</th>
-                    <th>Qty</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {items.map((item, idx) => (
-                    <tr key={idx}>
-                      <td>
-                        <code style={{ fontSize: '0.78rem', background: 'var(--cream-dark)', padding: '2px 6px', borderRadius: 4 }}>
-                          {item.description}
-                        </code>
-                      </td>
-                      <td>
-                        {item.productId ? (
-                          <span className="badge badge-green">{item.productName}</span>
-                        ) : (
-                          <span className="badge badge-amber">Unknown</span>
-                        )}
-                      </td>
-                      <td>
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          value={item.price ?? ''}
-                          onChange={e => updateItem(idx, 'price', parseFloat(e.target.value))}
-                          style={{ width: 80, padding: '4px 8px', border: '1px solid var(--border)', borderRadius: 6, fontSize: '0.85rem' }}
-                        />
-                      </td>
-                      <td style={{ color: 'var(--ink-light)', fontSize: '0.85rem' }}>{item.quantity}</td>
-                      <td>
-                        <button className="btn btn-danger btn-sm" onClick={() => removeItem(idx)}>✕</button>
-                      </td>
+          {items.length > 0 && (
+            <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Raw Text</th>
+                      <th>Product</th>
+                      <th>Price</th>
+                      <th>Qty</th>
+                      <th></th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {items.map((item, idx) => (
+                      <tr key={idx}>
+                        <td>
+                          <code style={{ fontSize: '0.78rem', background: 'var(--cream-dark)', padding: '2px 6px', borderRadius: 4 }}>
+                            {item.description}
+                          </code>
+                        </td>
+                        <td>
+                          {item.productId
+                            ? <span className="badge badge-green">{item.productName}</span>
+                            : <span className="badge badge-amber">Unknown</span>
+                          }
+                        </td>
+                        <td>
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            value={item.price ?? ''}
+                            onChange={e => updateItem(idx, 'price', parseFloat(e.target.value))}
+                            style={{ width: 80, padding: '4px 8px', border: '1px solid var(--border)', borderRadius: 6, fontSize: '0.85rem' }}
+                          />
+                        </td>
+                        <td style={{ color: 'var(--ink-light)', fontSize: '0.85rem' }}>{item.quantity}</td>
+                        <td>
+                          <button className="btn btn-danger btn-sm" onClick={() => removeItem(idx)}>✕</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
-          </div>
+          )}
         </div>
       )}
 

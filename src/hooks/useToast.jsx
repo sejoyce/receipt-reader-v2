@@ -1,8 +1,6 @@
-// src/hooks/useToast.jsx
 import { createContext, useContext, useState, useCallback } from 'react'
 
 const ToastContext = createContext(null)
-
 let idCounter = 0
 
 export function ToastProvider({ children }) {

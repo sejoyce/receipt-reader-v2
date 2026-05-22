@@ -1,11 +1,10 @@
-// src/lib/db.js — All Firestore read/write operations
+// src/lib/db.js — All Firestore read/write operations (free tier, no Storage)
 
 import {
-  collection, doc, getDoc, getDocs, addDoc, updateDoc, setDoc,
+  collection, doc, getDocs, addDoc, updateDoc,
   query, where, orderBy, serverTimestamp, arrayUnion
 } from 'firebase/firestore'
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'
-import { db, storage } from './firebase'
+import { db } from './firebase'
 
 // ── Products ──────────────────────────────────────────────────────────────────
 
@@ -61,25 +60,21 @@ export async function getOrCreateStore(name) {
 
 // ── Receipts ──────────────────────────────────────────────────────────────────
 
-export async function saveReceipt({ storeId, storeName, date, imageFile, items, uploadedBy }) {
-  let imageUrl = null
-  if (imageFile) {
-    const storageRef = ref(storage, `receipts/${Date.now()}_${imageFile.name}`)
-    await uploadBytes(storageRef, imageFile)
-    imageUrl = await getDownloadURL(storageRef)
-  }
+// NOTE: Receipt images are NOT stored — OCR runs locally in the browser and
+// the image is discarded. Only the extracted item data is saved to Firestore.
+// This keeps the app on Firebase's free Spark plan (no Storage needed).
 
+export async function saveReceipt({ storeId, storeName, date, items, uploadedBy }) {
   const receiptRef = await addDoc(collection(db, 'receipts'), {
     storeId,
     storeName,
     date: date ? new Date(date) : serverTimestamp(),
-    imageUrl,
     uploadedBy: uploadedBy || 'unknown',
     items,
     createdAt: serverTimestamp(),
   })
 
-  // Write price history entries for resolved items
+  // Write price history entries for all resolved items
   const pricePromises = items
     .filter(item => item.productId && item.price != null)
     .map(item =>
@@ -124,7 +119,6 @@ export async function getAllPriceHistory() {
 }
 
 export async function getBestDeals() {
-  // For each product, find the lowest price entry across all stores
   const allHistory = await getAllPriceHistory()
   const byProduct = {}
 
