@@ -8,9 +8,12 @@ import Products from './pages/Products'
 import BestDeals from './pages/BestDeals'
 import { ToastProvider } from './hooks/useToast'
 
+// Must match your GitHub repo name exactly, e.g. '/grocery-tracker'
+const basename = import.meta.env.VITE_BASE_PATH || '/'
+
 export default function App() {
   return (
-    <BrowserRouter>
+    <BrowserRouter basename={basename}>
       <ToastProvider>
         <div className="app-shell">
           <Sidebar />
