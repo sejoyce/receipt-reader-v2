@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { UploadCloud, CheckCircle, AlertCircle, Scale } from 'lucide-react'
-import { extractTextFromImage, parseReceiptText, extractWithClaude } from '../lib/ocr'
+import { extractTextFromImage, parseReceiptText, extractWithClaude, detectDateFromText } from '../lib/ocr'
 import { findProductByAlias, getOrCreateStore, saveReceipt, detectStoreFromText } from '../lib/db'
 import { useAuth } from '../hooks/useAuth'
 import AliasModal from '../components/AliasModal'
@@ -72,6 +72,11 @@ export default function UploadReceipt() {
           const detected = detectStoreFromText(rawText)
           if (detected.storeName) { detectedStore = detected.storeName; setStoreAutoDetected(true) }
           if (detected.storeAddress) detectedAddress = detected.storeAddress
+        }
+        // Auto-detect date from OCR text
+        if (!detectedDate) {
+          const foundDate = detectDateFromText(rawText)
+          if (foundDate) detectedDate = foundDate
         }
       }
 

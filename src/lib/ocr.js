@@ -17,6 +17,58 @@ export async function extractTextFromImage(imageFile, onProgress) {
 }
 
 /**
+ * Extract the receipt date from raw OCR text.
+ * Scans all lines for common date formats used on grocery receipts.
+ * Returns a "YYYY-MM-DD" string, or null if not found.
+ *
+ * Handles:
+ *   05/06/26          (MM/DD/YY  — Wegmans)
+ *   05/06/2026        (MM/DD/YYYY)
+ *   2026-05-06        (ISO)
+ *   May 6, 2026       (long form)
+ *   06 MAY 26         (day month year)
+ */
+export function detectDateFromText(rawText) {
+  const lines = rawText.split('\n').map(l => l.trim()).filter(Boolean)
+
+  for (const line of lines) {
+    // MM/DD/YY or MM/DD/YYYY  (most US receipts including Wegmans)
+    let m = line.match(/\b(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})\b/)
+    if (m) {
+      let [, month, day, year] = m
+      if (year.length === 2) year = '20' + year
+      const d = new Date(`${year}-${month.padStart(2,'0')}-${day.padStart(2,'0')}`)
+      if (!isNaN(d) && d.getFullYear() >= 2020 && d.getFullYear() <= 2035) {
+        return `${year}-${month.padStart(2,'0')}-${day.padStart(2,'0')}`
+      }
+    }
+
+    // ISO: YYYY-MM-DD
+    m = line.match(/\b(202\d)-(\d{2})-(\d{2})\b/)
+    if (m) return `${m[1]}-${m[2]}-${m[3]}`
+
+    // Long form: "May 6, 2026" or "MAY 06 2026"
+    const months = { jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12 }
+    m = line.match(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})[,\s]+(202\d)\b/i)
+    if (m) {
+      const mo = String(months[m[1].toLowerCase().slice(0,3)]).padStart(2,'0')
+      return `${m[3]}-${mo}-${m[2].padStart(2,'0')}`
+    }
+
+    // "06 MAY 26" or "06 MAY 2026"
+    m = line.match(/\b(\d{1,2})\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+(\d{2,4})\b/i)
+    if (m) {
+      const mo = String(months[m[2].toLowerCase().slice(0,3)]).padStart(2,'0')
+      let yr = m[3]; if (yr.length === 2) yr = '20' + yr
+      return `${yr}-${mo}-${m[1].padStart(2,'0')}`
+    }
+  }
+
+  return null
+}
+
+
+/**
  * Parse raw OCR text into structured receipt items.
  *
  * Handles all observed formats:
