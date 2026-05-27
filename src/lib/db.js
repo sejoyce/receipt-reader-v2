@@ -1,5 +1,3 @@
-// src/lib/db.js — All Firestore read/write operations (free tier, no Storage)
-
 import {
   collection, doc, getDocs, addDoc, updateDoc,
   query, where, orderBy, serverTimestamp, arrayUnion
@@ -23,13 +21,19 @@ export async function createProduct({ name, category, aliases = [] }) {
   return ref.id
 }
 
+export async function updateProduct(productId, { name, category }) {
+  await updateDoc(doc(db, 'products', productId), {
+    ...(name !== undefined && { name }),
+    ...(category !== undefined && { category }),
+  })
+}
+
 export async function addAliasToProduct(productId, alias) {
   await updateDoc(doc(db, 'products', productId), {
     aliases: arrayUnion(alias.toUpperCase().trim())
   })
 }
 
-/** Find a product by one of its aliases. Returns product or null. */
 export async function findProductByAlias(alias) {
   const normalized = alias.toUpperCase().trim()
   const q = query(collection(db, 'products'), where('aliases', 'array-contains', normalized))
@@ -46,7 +50,7 @@ export async function getAllStores() {
   return snap.docs.map(d => ({ id: d.id, ...d.data() }))
 }
 
-export async function getOrCreateStore(name) {
+export async function getOrCreateStore(name, address = '') {
   const normalized = name.trim()
   const q = query(collection(db, 'stores'), where('name', '==', normalized))
   const snap = await getDocs(q)
@@ -54,15 +58,97 @@ export async function getOrCreateStore(name) {
     const d = snap.docs[0]
     return { id: d.id, ...d.data() }
   }
-  const ref = await addDoc(collection(db, 'stores'), { name: normalized, createdAt: serverTimestamp() })
-  return { id: ref.id, name: normalized }
+  const ref = await addDoc(collection(db, 'stores'), {
+    name: normalized,
+    address: address.trim(),
+    createdAt: serverTimestamp()
+  })
+  return { id: ref.id, name: normalized, address: address.trim() }
+}
+
+// ── Store name aliases (e.g. "TRADER JOE'S #123" → "Trader Joe's") ───────────
+
+// Known store name patterns → canonical name
+const STORE_PATTERNS = [
+  [/trader\s*joe/i,         "Trader Joe's"],
+  [/whole\s*foods/i,        "Whole Foods"],
+  [/kroger/i,               "Kroger"],
+  [/safeway/i,              "Safeway"],
+  [/albertson/i,            "Albertsons"],
+  [/aldi/i,                 "ALDI"],
+  [/lidl/i,                 "Lidl"],
+  [/costco/i,               "Costco"],
+  [/sam.s\s*club/i,         "Sam's Club"],
+  [/walmart|wal-mart/i,     "Walmart"],
+  [/target/i,               "Target"],
+  [/publix/i,               "Publix"],
+  [/meijer/i,               "Meijer"],
+  [/heb\b/i,                "H-E-B"],
+  [/wegman/i, "Wegmans"],
+  [/stop\s*&?\s*shop/i,     "Stop & Shop"],
+  [/giant\s*food/i,         "Giant Food"],
+  [/food\s*lion/i,          "Food Lion"],
+  [/sprouts/i,              "Sprouts"],
+  [/harris\s*teeter/i,      "Harris Teeter"],
+  [/vons/i,                 "Vons"],
+  [/ralphs/i,               "Ralphs"],
+  [/market\s*basket/i,      "Market Basket"],
+  [/shaw.s/i,               "Shaw's"],
+  [/hannaford/i,            "Hannaford"],
+  [/price\s*chopper/i,      "Price Chopper"],
+  [/winco/i,                "WinCo"],
+  [/food\s*4\s*less/i,      "Food 4 Less"],
+  [/smart\s*&?\s*final/i,   "Smart & Final"],
+  [/fresh\s*thyme/i,        "Fresh Thyme"],
+  [/lucky\s*supermarket/i,  "Lucky Supermarket"],
+]
+
+/**
+ * Try to extract store name and address from the top lines of OCR text.
+ * Returns { storeName, storeAddress } or nulls if not found.
+ */
+export function detectStoreFromText(rawText) {
+  const lines = rawText.split('\n').map(l => l.trim()).filter(Boolean)
+  // Look at top 8 lines for store name
+  const top = lines.slice(0, 8)
+
+  let storeName = null
+  let storeAddress = null
+
+  for (const line of top) {
+    if (storeName) break
+    for (const [pattern, canonical] of STORE_PATTERNS) {
+      if (pattern.test(line)) {
+        storeName = canonical
+        break
+      }
+    }
+  }
+
+  // Detect address: look for a line with a number + street word
+  const addressPattern = /^\d+\s+\w.*(st|ave|blvd|rd|dr|ln|way|pkwy|hwy|court|ct|plaza|plz|mall|cir|circle)\.?\b/i
+  for (const line of top) {
+    if (addressPattern.test(line)) {
+      storeAddress = line
+      break
+    }
+  }
+
+  // Also try to grab city/state line after address
+  if (storeAddress) {
+    const addrIdx = lines.indexOf(storeAddress)
+    if (addrIdx >= 0 && lines[addrIdx + 1]) {
+      const cityLine = lines[addrIdx + 1]
+      if (/[A-Z]{2}\s+\d{5}/.test(cityLine) || /,\s*[A-Z]{2}/.test(cityLine)) {
+        storeAddress = storeAddress + ', ' + cityLine
+      }
+    }
+  }
+
+  return { storeName, storeAddress }
 }
 
 // ── Receipts ──────────────────────────────────────────────────────────────────
-
-// NOTE: Receipt images are NOT stored — OCR runs locally in the browser and
-// the image is discarded. Only the extracted item data is saved to Firestore.
-// This keeps the app on Firebase's free Spark plan (no Storage needed).
 
 export async function saveReceipt({ storeId, storeName, date, items, uploadedBy }) {
   const receiptRef = await addDoc(collection(db, 'receipts'), {
@@ -74,7 +160,6 @@ export async function saveReceipt({ storeId, storeName, date, items, uploadedBy 
     createdAt: serverTimestamp(),
   })
 
-  // Write price history entries for all resolved items
   const pricePromises = items
     .filter(item => item.productId && item.price != null)
     .map(item =>
@@ -85,6 +170,7 @@ export async function saveReceipt({ storeId, storeName, date, items, uploadedBy 
         storeName,
         price: item.price,
         unit: item.unit || '',
+        pricePerUnit: item.pricePerUnit || null,
         date: date ? new Date(date) : serverTimestamp(),
         receiptId: receiptRef.id,
       })

@@ -1,18 +1,32 @@
 import { useState } from 'react'
 import { NavLink } from 'react-router-dom'
-import { UploadCloud, ReceiptText, BarChart2, ShoppingCart, Sparkles, Package, X, Menu } from 'lucide-react'
+import { UploadCloud, ReceiptText, BarChart2, ShoppingCart, Sparkles, Package, X, Menu, LogOut } from 'lucide-react'
+import { useAuth } from '../hooks/useAuth'
 
 const navItems = [
-  { to: '/',         label: 'Dashboard',      icon: Sparkles },
-  { to: '/upload',   label: 'Upload',         icon: UploadCloud },
-  { to: '/receipts', label: 'Receipts',       icon: ReceiptText },
-  { to: '/compare',  label: 'Compare',        icon: BarChart2 },
-  { to: '/products', label: 'Products',       icon: Package },
-  { to: '/deals',    label: 'Best Deals',     icon: ShoppingCart },
+  { to: '/',         label: 'Dashboard',  icon: Sparkles },
+  { to: '/upload',   label: 'Upload',     icon: UploadCloud },
+  { to: '/receipts', label: 'Receipts',   icon: ReceiptText },
+  { to: '/compare',  label: 'Compare',    icon: BarChart2 },
+  { to: '/products', label: 'Products',   icon: Package },
+  { to: '/deals',    label: 'Best Deals', icon: ShoppingCart },
 ]
 
 export default function Sidebar() {
+  const { user, logout } = useAuth()
   const [mobileOpen, setMobileOpen] = useState(false)
+
+  const NavLinks = ({ onNav }) => (
+    <ul className="nav-list">
+      {navItems.map(({ to, label, icon: Icon }) => (
+        <li key={to} className="nav-item">
+          <NavLink to={to} end={to === '/'} className={({ isActive }) => isActive ? 'active' : ''} onClick={onNav}>
+            <Icon size={16} />{label}
+          </NavLink>
+        </li>
+      ))}
+    </ul>
+  )
 
   return (
     <>
@@ -22,16 +36,15 @@ export default function Sidebar() {
           <h1>Basket</h1>
           <span>Price Tracker</span>
         </div>
-        <ul className="nav-list">
-          {navItems.map(({ to, label, icon: Icon }) => (
-            <li key={to} className="nav-item">
-              <NavLink to={to} end={to === '/'} className={({ isActive }) => isActive ? 'active' : ''}>
-                <Icon size={16} />
-                {label}
-              </NavLink>
-            </li>
-          ))}
-        </ul>
+        <NavLinks onNav={undefined} />
+        <div style={{ padding: '16px 20px', borderTop: '1px solid rgba(255,255,255,0.08)', marginTop: 'auto' }}>
+          <div style={{ fontSize: '0.75rem', color: 'var(--ink-faint)', marginBottom: 10, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {user?.email}
+          </div>
+          <button onClick={logout} className="btn btn-ghost btn-sm" style={{ width: '100%', justifyContent: 'center', color: 'rgba(255,255,255,0.5)', borderColor: 'rgba(255,255,255,0.12)' }}>
+            <LogOut size={14} /> Sign out
+          </button>
+        </div>
       </nav>
 
       {/* ── Mobile top bar ── */}
@@ -42,7 +55,7 @@ export default function Sidebar() {
         </button>
       </div>
 
-      {/* ── Mobile drawer overlay ── */}
+      {/* ── Mobile drawer ── */}
       {mobileOpen && (
         <div className="mobile-overlay" onClick={() => setMobileOpen(false)}>
           <nav className="mobile-drawer" onClick={e => e.stopPropagation()}>
@@ -51,25 +64,15 @@ export default function Sidebar() {
                 <h1 style={{ fontFamily: 'DM Serif Display, serif', fontSize: '1.5rem', color: 'var(--cream)' }}>Basket</h1>
                 <span style={{ fontSize: '0.72rem', color: 'var(--ink-faint)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Price Tracker</span>
               </div>
-              <button className="mobile-close-btn" onClick={() => setMobileOpen(false)} aria-label="Close menu">
-                <X size={20} />
+              <button className="mobile-close-btn" onClick={() => setMobileOpen(false)}><X size={20} /></button>
+            </div>
+            <NavLinks onNav={() => setMobileOpen(false)} />
+            <div style={{ padding: '16px 20px', marginTop: 'auto', borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+              <div style={{ fontSize: '0.75rem', color: 'var(--ink-faint)', marginBottom: 8 }}>{user?.email}</div>
+              <button onClick={() => { logout(); setMobileOpen(false) }} className="btn btn-ghost btn-sm" style={{ color: 'rgba(255,255,255,0.5)', borderColor: 'rgba(255,255,255,0.12)' }}>
+                <LogOut size={14} /> Sign out
               </button>
             </div>
-            <ul className="nav-list" style={{ padding: '16px 12px' }}>
-              {navItems.map(({ to, label, icon: Icon }) => (
-                <li key={to} className="nav-item">
-                  <NavLink
-                    to={to}
-                    end={to === '/'}
-                    className={({ isActive }) => isActive ? 'active' : ''}
-                    onClick={() => setMobileOpen(false)}
-                  >
-                    <Icon size={16} />
-                    {label}
-                  </NavLink>
-                </li>
-              ))}
-            </ul>
           </nav>
         </div>
       )}
@@ -77,14 +80,8 @@ export default function Sidebar() {
       {/* ── Mobile bottom tab bar ── */}
       <nav className="mobile-tabbar">
         {navItems.map(({ to, label, icon: Icon }) => (
-          <NavLink
-            key={to}
-            to={to}
-            end={to === '/'}
-            className={({ isActive }) => `mobile-tab${isActive ? ' active' : ''}`}
-          >
-            <Icon size={20} />
-            <span>{label}</span>
+          <NavLink key={to} to={to} end={to === '/'} className={({ isActive }) => `mobile-tab${isActive ? ' active' : ''}`}>
+            <Icon size={20} /><span>{label}</span>
           </NavLink>
         ))}
       </nav>

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { getAllProducts, createProduct, addAliasToProduct } from '../lib/db'
-import { Package, Plus } from 'lucide-react'
+import { getAllProducts, createProduct, addAliasToProduct, updateProduct } from '../lib/db'
+import { Package, Plus, Pencil, Check, X } from 'lucide-react'
 import { useToast } from '../hooks/useToast'
 
 export default function Products() {
@@ -14,6 +14,8 @@ export default function Products() {
   const [filter, setFilter] = useState('')
   const [addingAliasFor, setAddingAliasFor] = useState(null)
   const [aliasInput, setAliasInput] = useState('')
+  // Inline editing state: { id, name, category }
+  const [editing, setEditing] = useState(null)
 
   async function load() {
     const p = await getAllProducts()
@@ -44,6 +46,16 @@ export default function Products() {
     } catch (e) { toast('Failed: ' + e.message, 'error') }
   }
 
+  async function handleSaveEdit() {
+    if (!editing || !editing.name.trim()) return
+    try {
+      await updateProduct(editing.id, { name: editing.name.trim(), category: editing.category.trim() })
+      toast('Product updated!')
+      setEditing(null)
+      load()
+    } catch (e) { toast('Failed: ' + e.message, 'error') }
+  }
+
   const filtered = products.filter(p =>
     !filter || p.name.toLowerCase().includes(filter.toLowerCase()) ||
     p.category?.toLowerCase().includes(filter.toLowerCase()) ||
@@ -70,18 +82,18 @@ export default function Products() {
         <div className="modal-overlay">
           <div className="modal">
             <h3>New Product</h3>
-            <p style={{ color: 'var(--ink-light)', fontSize: '0.875rem', marginBottom: 20 }}>Add a product to your catalog. Aliases are added automatically when you scan receipts.</p>
+            <p style={{ color: 'var(--ink-light)', fontSize: '0.875rem', marginBottom: 20 }}>Aliases are added automatically when you scan receipts.</p>
             <div className="form-group">
               <label className="form-label">Product Name *</label>
               <input className="form-input" placeholder="e.g. Organic Whole Milk 1 Gallon" value={newName} onChange={e => setNewName(e.target.value)} autoFocus />
             </div>
             <div className="form-group">
               <label className="form-label">Category</label>
-              <input className="form-input" placeholder="e.g. Dairy" list="categories" value={newCategory} onChange={e => setNewCategory(e.target.value)} />
-              <datalist id="categories">{categories.map(c => <option key={c} value={c} />)}</datalist>
+              <input className="form-input" placeholder="e.g. Dairy" list="cat-list" value={newCategory} onChange={e => setNewCategory(e.target.value)} />
+              <datalist id="cat-list">{categories.map(c => <option key={c} value={c} />)}</datalist>
             </div>
             <div className="form-group">
-              <label className="form-label">Initial Alias (receipt abbreviation)</label>
+              <label className="form-label">Initial Alias (optional)</label>
               <input className="form-input" placeholder="e.g. ORG WHL MLK" value={newAlias} onChange={e => setNewAlias(e.target.value)} />
             </div>
             <div className="modal-actions">
@@ -104,45 +116,79 @@ export default function Products() {
         <div className="table-wrap">
           <table>
             <thead>
-              <tr><th>Product</th><th>Category</th><th>Aliases (receipt codes)</th></tr>
+              <tr><th>Product</th><th>Category</th><th>Aliases (receipt codes)</th><th></th></tr>
             </thead>
             <tbody>
-              {filtered.map(p => (
-                <tr key={p.id}>
-                  <td><strong>{p.name}</strong></td>
-                  <td>{p.category ? <span className="badge badge-gray">{p.category}</span> : <span style={{ color: 'var(--ink-faint)' }}>—</span>}</td>
-                  <td>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
-                      {(p.aliases || []).map(a => (
-                        <code key={a} style={{ fontSize: '0.72rem', background: 'var(--cream-dark)', padding: '2px 7px', borderRadius: 4, color: 'var(--ink-light)' }}>{a}</code>
-                      ))}
-                      {addingAliasFor === p.id ? (
-                        <div style={{ display: 'flex', gap: 4 }}>
-                          <input
-                            className="form-input"
-                            style={{ padding: '3px 8px', fontSize: '0.8rem', width: 140 }}
-                            placeholder="ABBREV"
-                            value={aliasInput}
-                            onChange={e => setAliasInput(e.target.value)}
-                            autoFocus
-                            onKeyDown={e => {
-                              if (e.key === 'Enter') handleAddAlias(p.id)
-                              if (e.key === 'Escape') { setAddingAliasFor(null); setAliasInput('') }
-                            }}
-                          />
-                          <button className="btn btn-primary btn-sm" onClick={() => handleAddAlias(p.id)}>Add</button>
-                          <button className="btn btn-ghost btn-sm" onClick={() => { setAddingAliasFor(null); setAliasInput('') }}>✕</button>
+              {filtered.map(p => {
+                const isEditing = editing?.id === p.id
+                return (
+                  <tr key={p.id}>
+                    <td>
+                      {isEditing ? (
+                        <input
+                          className="form-input"
+                          style={{ padding: '5px 10px', fontSize: '0.875rem' }}
+                          value={editing.name}
+                          onChange={e => setEditing(v => ({ ...v, name: e.target.value }))}
+                          autoFocus
+                          onKeyDown={e => { if (e.key === 'Enter') handleSaveEdit(); if (e.key === 'Escape') setEditing(null) }}
+                        />
+                      ) : (
+                        <strong>{p.name}</strong>
+                      )}
+                    </td>
+                    <td>
+                      {isEditing ? (
+                        <input
+                          className="form-input"
+                          style={{ padding: '5px 10px', fontSize: '0.875rem', width: 140 }}
+                          list="cat-list-edit"
+                          value={editing.category}
+                          onChange={e => setEditing(v => ({ ...v, category: e.target.value }))}
+                          placeholder="Category"
+                        />
+                      ) : (
+                        p.category ? <span className="badge badge-gray">{p.category}</span> : <span style={{ color: 'var(--ink-faint)' }}>—</span>
+                      )}
+                      <datalist id="cat-list-edit">{categories.map(c => <option key={c} value={c} />)}</datalist>
+                    </td>
+                    <td>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
+                        {(p.aliases || []).map(a => (
+                          <code key={a} style={{ fontSize: '0.72rem', background: 'var(--cream-dark)', padding: '2px 7px', borderRadius: 4, color: 'var(--ink-light)' }}>{a}</code>
+                        ))}
+                        {!isEditing && (
+                          addingAliasFor === p.id ? (
+                            <div style={{ display: 'flex', gap: 4 }}>
+                              <input className="form-input" style={{ padding: '3px 8px', fontSize: '0.8rem', width: 140 }} placeholder="ABBREV" value={aliasInput} onChange={e => setAliasInput(e.target.value)} autoFocus
+                                onKeyDown={e => { if (e.key === 'Enter') handleAddAlias(p.id); if (e.key === 'Escape') { setAddingAliasFor(null); setAliasInput('') } }} />
+                              <button className="btn btn-primary btn-sm" onClick={() => handleAddAlias(p.id)}>Add</button>
+                              <button className="btn btn-ghost btn-sm" onClick={() => { setAddingAliasFor(null); setAliasInput('') }}>✕</button>
+                            </div>
+                          ) : (
+                            <button onClick={() => { setAddingAliasFor(p.id); setAliasInput('') }}
+                              style={{ background: 'none', border: '1px dashed var(--border)', borderRadius: 4, padding: '2px 6px', fontSize: '0.7rem', color: 'var(--ink-faint)', cursor: 'pointer' }}>
+                              + alias
+                            </button>
+                          )
+                        )}
+                      </div>
+                    </td>
+                    <td>
+                      {isEditing ? (
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <button className="btn btn-primary btn-sm" onClick={handleSaveEdit} title="Save"><Check size={13} /></button>
+                          <button className="btn btn-ghost btn-sm" onClick={() => setEditing(null)} title="Cancel"><X size={13} /></button>
                         </div>
                       ) : (
-                        <button onClick={() => { setAddingAliasFor(p.id); setAliasInput('') }}
-                          style={{ background: 'none', border: '1px dashed var(--border)', borderRadius: 4, padding: '2px 6px', fontSize: '0.7rem', color: 'var(--ink-faint)', cursor: 'pointer' }}>
-                          + alias
+                        <button className="btn btn-ghost btn-sm" onClick={() => setEditing({ id: p.id, name: p.name, category: p.category || '' })} title="Edit name & category">
+                          <Pencil size={13} />
                         </button>
                       )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>
