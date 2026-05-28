@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { UploadCloud, CheckCircle, AlertCircle, Scale } from 'lucide-react'
+import { UploadCloud, CheckCircle, AlertCircle, Scale, ChevronDown, ChevronUp } from 'lucide-react'
 import { extractTextFromImage, parseReceiptText, extractWithClaude, detectDateFromText } from '../lib/ocr'
 import { findProductByAlias, getOrCreateStore, saveReceipt, detectStoreFromText } from '../lib/db'
 import { useAuth } from '../hooks/useAuth'
@@ -19,11 +19,14 @@ export default function UploadReceipt() {
   const [ocrProgress, setOcrProgress] = useState(0)
   const [ocrMethod, setOcrMethod] = useState('tesseract')
 
+  // Receipt metadata — hidden initially, revealed via "Edit details" toggle
   const [storeName, setStoreName] = useState('')
   const [storeAddress, setStoreAddress] = useState('')
   const [receiptDate, setReceiptDate] = useState('')
   const [uploadedBy, setUploadedBy] = useState(user?.email?.split('@')[0] || '')
   const [storeAutoDetected, setStoreAutoDetected] = useState(false)
+  const [dateAutoDetected, setDateAutoDetected] = useState(false)
+  const [showDetails, setShowDetails] = useState(false)
 
   const [items, setItems] = useState([])
   const [unknownQueue, setUnknownQueue] = useState([])
@@ -35,6 +38,7 @@ export default function UploadReceipt() {
     setImageFile(file)
     setImagePreview(URL.createObjectURL(file))
     setStoreAutoDetected(false)
+    setDateAutoDetected(false)
   }
 
   function handleDrop(e) {
@@ -43,7 +47,6 @@ export default function UploadReceipt() {
     if (file?.type.startsWith('image/')) {
       setImageFile(file)
       setImagePreview(URL.createObjectURL(file))
-      setStoreAutoDetected(false)
     }
   }
 
@@ -63,20 +66,18 @@ export default function UploadReceipt() {
         parsedItems = result.items
         if (!detectedStore && result.storeName) { detectedStore = result.storeName; setStoreAutoDetected(true) }
         if (!detectedAddress && result.storeAddress) detectedAddress = result.storeAddress
-        if (!detectedDate && result.date) detectedDate = result.date
+        if (!detectedDate && result.date) { detectedDate = result.date; setDateAutoDetected(true) }
       } else {
         const rawText = await extractTextFromImage(imageFile, setOcrProgress)
         parsedItems = parseReceiptText(rawText)
-        // Auto-detect store from OCR text
         if (!detectedStore) {
           const detected = detectStoreFromText(rawText)
           if (detected.storeName) { detectedStore = detected.storeName; setStoreAutoDetected(true) }
           if (detected.storeAddress) detectedAddress = detected.storeAddress
         }
-        // Auto-detect date from OCR text
         if (!detectedDate) {
           const foundDate = detectDateFromText(rawText)
-          if (foundDate) detectedDate = foundDate
+          if (foundDate) { detectedDate = foundDate; setDateAutoDetected(true) }
         }
       }
 
@@ -84,7 +85,6 @@ export default function UploadReceipt() {
       if (detectedAddress) setStoreAddress(detectedAddress)
       if (detectedDate) setReceiptDate(detectedDate)
 
-      // Resolve known aliases
       const resolved = await Promise.all(
         parsedItems.map(async item => {
           const product = await findProductByAlias(item.description)
@@ -126,15 +126,13 @@ export default function UploadReceipt() {
   }
 
   async function handleSave() {
-    if (!storeName.trim()) { toast('Please enter a store name', 'error'); return }
+    if (!storeName.trim()) { toast('Please enter a store name in receipt details', 'error'); setShowDetails(true); return }
     setStep('saving')
     try {
       const store = await getOrCreateStore(storeName, storeAddress)
       await saveReceipt({
-        storeId: store.id,
-        storeName: store.name,
-        date: receiptDate || null,
-        items,
+        storeId: store.id, storeName: store.name, storeAddress,
+        date: receiptDate || null, items,
         uploadedBy: uploadedBy || user?.email || 'unknown',
       })
       setStep('done')
@@ -148,7 +146,8 @@ export default function UploadReceipt() {
 
   function reset() {
     setStep('upload'); setImageFile(null); setImagePreview(null); setItems([])
-    setStoreName(''); setStoreAddress(''); setReceiptDate(''); setStoreAutoDetected(false)
+    setStoreName(''); setStoreAddress(''); setReceiptDate('')
+    setStoreAutoDetected(false); setDateAutoDetected(false); setShowDetails(false)
     setUnknownQueue([]); setCurrentUnknown(null)
   }
 
@@ -181,7 +180,7 @@ export default function UploadReceipt() {
         {['Upload', 'Process', 'Review', 'Save'].map((label, i) => {
           const stepMap = ['upload', 'processing', 'review', 'saving']
           const idx = stepMap.indexOf(step)
-          const active = i === idx; const done = i < idx
+          const active = i === idx, done = i < idx
           return (
             <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <div style={{ width: 24, height: 24, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.7rem', fontWeight: 700, background: done ? 'var(--green)' : active ? 'var(--ink)' : 'var(--border)', color: done || active ? 'white' : 'var(--ink-faint)' }}>
@@ -194,61 +193,33 @@ export default function UploadReceipt() {
         })}
       </div>
 
+      {/* Upload step */}
       {step === 'upload' && (
-        <div className="grid-2" style={{ gap: 24, alignItems: 'start' }}>
-          <div>
-            <div onDrop={handleDrop} onDragOver={e => e.preventDefault()} onClick={() => fileRef.current?.click()}
-              style={{ border: `2px dashed ${imageFile ? 'var(--green)' : 'var(--border)'}`, borderRadius: 'var(--radius-lg)', padding: '40px 24px', textAlign: 'center', cursor: 'pointer', background: imageFile ? 'var(--green-pale)' : 'var(--cream)', transition: 'all 0.2s', marginBottom: 16 }}>
-              {imagePreview
-                ? <img src={imagePreview} alt="receipt" style={{ maxHeight: 220, maxWidth: '100%', borderRadius: 8, objectFit: 'contain' }} />
-                : <><UploadCloud size={36} color="var(--ink-faint)" style={{ marginBottom: 12 }} /><p style={{ fontWeight: 600, marginBottom: 4 }}>Drop receipt image here</p><p style={{ fontSize: '0.8rem', color: 'var(--ink-faint)' }}>or click to browse · JPG, PNG, WEBP</p></>
-              }
-            </div>
-            <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={handleFileChange} style={{ display: 'none' }} />
-            <div style={{ fontSize: '0.78rem', color: 'var(--ink-faint)', background: 'var(--cream-dark)', borderRadius: 8, padding: '10px 14px' }}>
-              📱 Images are processed locally and never uploaded — 100% free tier.
-            </div>
+        <div style={{ maxWidth: 480 }}>
+          <div onDrop={handleDrop} onDragOver={e => e.preventDefault()} onClick={() => fileRef.current?.click()}
+            style={{ border: `2px dashed ${imageFile ? 'var(--green)' : 'var(--border)'}`, borderRadius: 'var(--radius-lg)', padding: '40px 24px', textAlign: 'center', cursor: 'pointer', background: imageFile ? 'var(--green-pale)' : 'var(--cream)', transition: 'all 0.2s', marginBottom: 16 }}>
+            {imagePreview
+              ? <img src={imagePreview} alt="receipt" style={{ maxHeight: 220, maxWidth: '100%', borderRadius: 8, objectFit: 'contain' }} />
+              : <><UploadCloud size={36} color="var(--ink-faint)" style={{ marginBottom: 12 }} /><p style={{ fontWeight: 600, marginBottom: 4 }}>Drop receipt image here</p><p style={{ fontSize: '0.8rem', color: 'var(--ink-faint)' }}>or click to browse · JPG, PNG, WEBP</p></>
+            }
+          </div>
+          <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={handleFileChange} style={{ display: 'none' }} />
+
+          <div className="form-group" style={{ marginBottom: 16 }}>
+            <label className="form-label">Extraction Method</label>
+            <select className="form-select" value={ocrMethod} onChange={e => setOcrMethod(e.target.value)}>
+              <option value="tesseract">Tesseract OCR (free, local)</option>
+              <option value="claude" disabled={!import.meta.env.VITE_ANTHROPIC_API_KEY}>Claude Vision (requires API key)</option>
+            </select>
           </div>
 
-          <div className="card">
-            <h3 style={{ fontSize: '1rem', marginBottom: 16 }}>Receipt Details</h3>
-            <div className="form-group">
-              <label className="form-label">Store Name *</label>
-              <div style={{ position: 'relative' }}>
-                <input className="form-input" placeholder="e.g. Trader Joe's" value={storeName} onChange={e => { setStoreName(e.target.value); setStoreAutoDetected(false) }} />
-                {storeAutoDetected && (
-                  <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', fontSize: '0.7rem', background: 'var(--green-pale)', color: 'var(--green)', padding: '2px 7px', borderRadius: 99, fontWeight: 600 }}>
-                    Auto-detected
-                  </span>
-                )}
-              </div>
-            </div>
-            <div className="form-group">
-              <label className="form-label">Store Address</label>
-              <input className="form-input" placeholder="e.g. 123 Main St, City, ST" value={storeAddress} onChange={e => setStoreAddress(e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label className="form-label">Date</label>
-              <input className="form-input" type="date" value={receiptDate} onChange={e => setReceiptDate(e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label className="form-label">Uploaded by</label>
-              <input className="form-input" placeholder="Your name" value={uploadedBy} onChange={e => setUploadedBy(e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label className="form-label">Extraction Method</label>
-              <select className="form-select" value={ocrMethod} onChange={e => setOcrMethod(e.target.value)}>
-                <option value="tesseract">Tesseract OCR (free, local)</option>
-                <option value="claude" disabled={!import.meta.env.VITE_ANTHROPIC_API_KEY}>Claude Vision (requires API key)</option>
-              </select>
-            </div>
-            <button className="btn btn-primary" style={{ width: '100%', justifyContent: 'center' }} disabled={!imageFile} onClick={processReceipt}>
-              <UploadCloud size={16} /> Process Receipt
-            </button>
-          </div>
+          <button className="btn btn-primary" style={{ width: '100%', justifyContent: 'center' }} disabled={!imageFile} onClick={processReceipt}>
+            <UploadCloud size={16} /> Process Receipt
+          </button>
         </div>
       )}
 
+      {/* Processing step */}
       {step === 'processing' && (
         <div style={{ textAlign: 'center', padding: '80px 20px' }}>
           <div className="spinner" style={{ width: 40, height: 40, borderWidth: 3, margin: '0 auto 20px' }} />
@@ -264,6 +235,7 @@ export default function UploadReceipt() {
         </div>
       )}
 
+      {/* Review step */}
       {step === 'review' && (
         <div>
           {currentUnknown && <AliasModal unknownItem={currentUnknown} onResolved={handleAliasResolved} onSkip={advanceQueue} />}
@@ -282,16 +254,48 @@ export default function UploadReceipt() {
             </div>
           </div>
 
-          {storeName && (
-            <div className="card" style={{ marginBottom: 16, padding: '14px 18px', display: 'flex', gap: 16, alignItems: 'center' }}>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: '0.72rem', color: 'var(--ink-faint)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>Store</div>
-                <div style={{ fontWeight: 600 }}>{storeName}</div>
-                {storeAddress && <div style={{ fontSize: '0.78rem', color: 'var(--ink-light)' }}>{storeAddress}</div>}
+          {/* Collapsible receipt details */}
+          <div className="card" style={{ marginBottom: 16, padding: 0, overflow: 'hidden' }}>
+            <button onClick={() => setShowDetails(v => !v)} style={{ width: '100%', padding: '14px 20px', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', textAlign: 'left' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 16, flex: 1 }}>
+                <div>
+                  <span style={{ fontWeight: 600, fontSize: '0.9rem' }}>
+                    {storeName || <span style={{ color: 'var(--red)', fontWeight: 600 }}>⚠ Store name required</span>}
+                  </span>
+                  {storeAddress && <span style={{ fontSize: '0.78rem', color: 'var(--ink-faint)', marginLeft: 10 }}>{storeAddress}</span>}
+                </div>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  {storeAutoDetected && <span className="badge badge-green" style={{ fontSize: '0.65rem' }}>Store detected</span>}
+                  {dateAutoDetected && <span className="badge badge-green" style={{ fontSize: '0.65rem' }}>Date detected</span>}
+                </div>
               </div>
-              {receiptDate && <div style={{ fontSize: '0.85rem', color: 'var(--ink-light)' }}>{receiptDate}</div>}
-            </div>
-          )}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                {receiptDate && <span style={{ fontSize: '0.82rem', color: 'var(--ink-light)' }}>{receiptDate}</span>}
+                <span style={{ fontSize: '0.78rem', color: 'var(--green)' }}>Edit details</span>
+                {showDetails ? <ChevronUp size={16} color="var(--ink-faint)" /> : <ChevronDown size={16} color="var(--ink-faint)" />}
+              </div>
+            </button>
+            {showDetails && (
+              <div style={{ padding: '0 20px 20px', borderTop: '1px solid var(--cream-dark)', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }} className="animate-fade">
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label">Store Name *</label>
+                  <input className="form-input" placeholder="e.g. Wegmans" value={storeName} onChange={e => { setStoreName(e.target.value); setStoreAutoDetected(false) }} />
+                </div>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label">Date</label>
+                  <input className="form-input" type="date" value={receiptDate} onChange={e => { setReceiptDate(e.target.value); setDateAutoDetected(false) }} />
+                </div>
+                <div className="form-group" style={{ marginBottom: 0, gridColumn: '1 / -1' }}>
+                  <label className="form-label">Store Address</label>
+                  <input className="form-input" placeholder="e.g. 371 Buckley Mill Rd, Wilmington, DE" value={storeAddress} onChange={e => setStoreAddress(e.target.value)} />
+                </div>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label">Uploaded by</label>
+                  <input className="form-input" placeholder="Your name" value={uploadedBy} onChange={e => setUploadedBy(e.target.value)} />
+                </div>
+              </div>
+            )}
+          </div>
 
           {items.length === 0 && (
             <div className="card"><div className="empty-state"><AlertCircle size={32} /><h3>No items detected</h3><p style={{ fontSize: '0.85rem' }}>Try re-uploading a clearer image.</p></div></div>
@@ -302,7 +306,7 @@ export default function UploadReceipt() {
               <div className="table-wrap">
                 <table>
                   <thead>
-                    <tr><th>Raw Text</th><th>Product</th><th>Price</th><th>Weight/Qty</th><th></th></tr>
+                    <tr><th>Raw Text</th><th>Product</th><th>Size/Weight</th><th>Price</th><th></th></tr>
                   </thead>
                   <tbody>
                     {items.map((item, idx) => (
@@ -316,18 +320,18 @@ export default function UploadReceipt() {
                         <td>
                           {item.productId
                             ? <span className="badge badge-green">{item.productName}</span>
-                            : <span className="badge badge-amber">Unknown</span>
-                          }
+                            : <span className="badge badge-amber">Unknown</span>}
+                        </td>
+                        <td style={{ fontSize: '0.8rem', color: 'var(--ink-light)' }}>
+                          {item.weight
+                            ? `${item.weight} ${item.unit} @ $${item.pricePerUnit}/${item.unit}`
+                            : item.packageSize
+                              ? `${item.packageSize} ${item.packageUnit}`
+                              : item.quantity > 1 ? `×${item.quantity}` : '—'}
                         </td>
                         <td>
                           <input type="number" step="0.01" min="0" value={item.price ?? ''} onChange={e => updateItem(idx, 'price', parseFloat(e.target.value))}
                             style={{ width: 80, padding: '4px 8px', border: '1px solid var(--border)', borderRadius: 6, fontSize: '0.85rem' }} />
-                        </td>
-                        <td style={{ fontSize: '0.8rem', color: 'var(--ink-light)' }}>
-                          {item.weight
-                            ? <span>{item.weight} {item.unit} @ ${item.pricePerUnit}/{item.unit}</span>
-                            : <span>×{item.quantity}</span>
-                          }
                         </td>
                         <td><button className="btn btn-danger btn-sm" onClick={() => removeItem(idx)}>✕</button></td>
                       </tr>
