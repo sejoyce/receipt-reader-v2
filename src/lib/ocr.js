@@ -72,7 +72,7 @@ export function parseReceiptText(rawText) {
   const items = []
 
   const skipPatterns = [
-    /^(subtotal|sub-total|total|tax\b|change|cash|card\b|debit|credit|balance|thank|welcome|savings|member|rewards|void|refund|loyalty|points|discount|mastercard|visa|discover|auth|rcpt|op#|every\s+day)/i,
+    /^(subtotal|sub-total|total|tax|change|cash|card\b|debit|credit|balance|thank|welcome|savings|member|rewards|void|refund|loyalty|points|discount|mastercard|visa|discover|auth|rcpt|op#|every\s+day)/i,
     /^\*+/,
     /^[-=]+$/,
     /^\d{1,2}\/\d{1,2}\/\d{2,4}\s+op#/i,  // "04/19/26 OP# 82"
@@ -80,6 +80,13 @@ export function parseReceiptText(rawText) {
     /^card\s+number/i,
     /^chase|^discover\s+purchase/i,
   ]
+
+  // Lines that are ONLY a price (e.g. standalone "0.00" after TAX line) — skip as items
+  // but still usable as price values when explicitly looked up by the weight/WT patterns
+  function isPriceOnlyNoise(line) {
+    // A line is noise if it's just a number with no description context
+    return /^\$?\d{1,4}\.\d{2}\s*[A-Z]?\s*$/.test(line)
+  }
 
   // Core price pattern: optional $, digits.2digits, optional whitespace,
   // optional SINGLE tax-code letter (F, H, T, B, N, etc.), end of string.
@@ -183,13 +190,16 @@ export function parseReceiptText(rawText) {
 
     // ── PATTERN D: regular item with price at end ─────────────────────────
     // e.g. "WB ORIG ALMONDMILK   2.49 F" or "HE SF HONEY COND   9.99"
+    // Skip standalone price-only lines (e.g. "0.00" after TAX line)
+    if (isPriceOnlyNoise(line)) { i++; continue }
+
     const pm = line.match(priceAtEnd)
     if (pm) {
       const price = parseFloat(pm[1])
       // Strip trailing price + optional tax code
       let description = line.replace(/\s+\$?\d{1,4}\.\d{2}\s*[A-Z]?\s*$/, '').trim()
 
-      // Skip if description is too short, price is implausible, or it's a total/balance line
+      // Skip if description is too short, price is implausible
       if (description.length < 2 || price > 500) { i++; continue }
 
       // Qty prefix: "2 x EGGS" or "2 @ EGGS"

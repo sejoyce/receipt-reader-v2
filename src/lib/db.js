@@ -74,9 +74,11 @@ const STORE_PATTERNS = [
 
 export function detectStoreFromText(rawText) {
   const lines = rawText.split('\n').map(l => l.trim()).filter(Boolean)
-  const top = lines.slice(0, 8)
+  // Search top 12 lines for store name (cursive logos may OCR on line 2-3)
+  const top = lines.slice(0, 12)
   let storeName = null, storeAddress = null
 
+  // Primary: exact pattern match
   for (const line of top) {
     if (storeName) break
     for (const [pattern, canonical] of STORE_PATTERNS) {
@@ -84,19 +86,62 @@ export function detectStoreFromText(rawText) {
     }
   }
 
-  const addressPattern = /^\d+\s+\w.*(st|ave|blvd|rd|dr|ln|way|pkwy|hwy|court|ct|plaza|plz|mall|cir|circle)\.?\b/i
+  // Fallback: fuzzy match for OCR-mangled store names
+  // Tesseract often misreads cursive/logo fonts — e.g. "Wegmans" → "Wegians", "UWegmans", "Weymans"
+  if (!storeName) {
+    const fuzzyPatterns = [
+      [/w[e3][gq][a-z]{2,5}s/i,             "Wegmans"],
+      [/tr[a@]d[e3]r.{0,3}j[o0][e3]/i,      "Trader Joe's"],
+      [/wh[o0][l1][e3].{0,4}f[o0][o0]d/i,   "Whole Foods"],
+      [/kr[o0]g[e3]r/i,                      "Kroger"],
+      [/s[a@]few[a@]y/i,                     "Safeway"],
+      [/[a@]lb[e3]rts[o0]n/i,               "Albertsons"],
+      [/c[o0]stc[o0]/i,                      "Costco"],
+      [/w[a@]lm[a@]rt/i,                     "Walmart"],
+      [/t[a@]rg[e3]t/i,                      "Target"],
+      [/p[u0]bl[i1]x/i,                      "Publix"],
+    ]
+    for (const line of top) {
+      if (storeName) break
+      for (const [pattern, canonical] of fuzzyPatterns) {
+        if (pattern.test(line)) { storeName = canonical; break }
+      }
+    }
+  }
+
+  // Address: search all top lines, not just 8
+  // Wegmans address "371 BUCKLEY MILL RD." is typically on line 4-5
+  const addressPattern = /^\d+\s+\w.*(st|ave|blvd|rd|dr|ln|way|pkwy|hwy|court|ct|plaza|plz|mall|cir|circle|mill|park|pike)\.?\b/i
   for (const line of top) {
     if (addressPattern.test(line)) {
       storeAddress = line
       const addrIdx = lines.indexOf(line)
       if (addrIdx >= 0 && lines[addrIdx + 1]) {
         const cityLine = lines[addrIdx + 1]
+        // Match "WILMINGTON, DE 19807" or "DE 19807"
         if (/[A-Z]{2}\s+\d{5}/.test(cityLine) || /,\s*[A-Z]{2}/.test(cityLine))
           storeAddress = storeAddress + ', ' + cityLine
       }
       break
     }
   }
+
+  // Last resort for address: look for a line with a 5-digit zip
+  if (!storeAddress) {
+    for (const line of top) {
+      if (/\b\d{5}\b/.test(line) && line.length > 6) {
+        // Walk back one line to see if it's a street address
+        const idx = lines.indexOf(line)
+        if (idx > 0 && addressPattern.test(lines[idx - 1])) {
+          storeAddress = lines[idx - 1] + ', ' + line
+        } else {
+          storeAddress = line
+        }
+        break
+      }
+    }
+  }
+
   return { storeName, storeAddress }
 }
 

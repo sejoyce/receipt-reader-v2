@@ -11,7 +11,17 @@ export default function AliasModal({ unknownItem, onResolved, onSkip }) {
   const [newCategory, setNewCategory] = useState('')
   const [loading, setLoading] = useState(false)
 
+  // Reload products on mount
   useEffect(() => { getAllProducts().then(setProducts) }, [])
+
+  // Reset form state whenever the unknown item changes (next item in queue)
+  useEffect(() => {
+    setMode('search')
+    setSearch('')
+    setSelected(null)
+    setNewName('')
+    setNewCategory('')
+  }, [unknownItem?.description])
 
   const filtered = products.filter(p =>
     p.name.toLowerCase().includes(search.toLowerCase()) ||
