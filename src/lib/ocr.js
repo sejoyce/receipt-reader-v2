@@ -72,13 +72,26 @@ export function parseReceiptText(rawText) {
   const items = []
 
   const skipPatterns = [
-    /^(subtotal|sub-total|total|tax|change|cash|card\b|debit|credit|balance|thank|welcome|savings|member|rewards|void|refund|loyalty|points|discount|mastercard|visa|discover|auth|rcpt|op#|every\s+day)/i,
+    // Standard footer/header keywords — match anywhere in line so OCR noise prefix ("BN ", "*** ") doesn't fool us
+    /\b(subtotal|sub-total|total|tax|change|cash|debit|credit|balance|savings|rewards|void|refund|loyalty|discount)\b/i,
+    // Payment methods
+    /\b(mastercard|visa|discover|amex|american\s+express)\b/i,
+    // Receipt metadata
+    /\b(auth|rcpt|op#|terminal|register|cashier|operator|store\s*#|trans|transaction|invoice)\b/i,
+    // Gratitude / marketing lines
+    /\b(thank|welcome|every\s+day|get\s+our\s+best|save\s+today|member|loyalty\s+card)\b/i,
+    // Pure punctuation / dividers
     /^\*+/,
-    /^[-=]+$/,
-    /^\d{1,2}\/\d{1,2}\/\d{2,4}\s+op#/i,  // "04/19/26 OP# 82"
-    /^\(\d{3}\)/,                            // phone numbers
+    /^[-=#]+$/,
+    // Date lines with operator: "04/19/26 OP# 82"
+    /^\d{1,2}\/\d{1,2}\/\d{2,4}\s+(op#|op\s+#)/i,
+    // Phone numbers
+    /^\(\d{3}\)\s*\d{3}/,
+    // Card / payment lines
     /^card\s+number/i,
-    /^chase|^discover\s+purchase/i,
+    /^(chase|discover\s+purchase|mastercard\s+purchase)/i,
+    // Points / fuel rewards
+    /\b(points|fuel\s+saver|club\s+card)\b/i,
   ]
 
   // Lines that are ONLY a price (e.g. standalone "0.00" after TAX line) — skip as items

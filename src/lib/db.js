@@ -38,6 +38,28 @@ export async function findProductByAlias(alias) {
   const d = snap.docs[0]
   return { id: d.id, ...d.data() }
 }
+// ── Blacklist ─────────────────────────────────────────────────────────────────
+// Stores OCR strings that are NOT products (e.g. "BN BALANCE", "*** TOTAL").
+// Any blacklisted string is silently removed from future receipt scans.
+
+export async function getBlacklist() {
+  const snap = await getDocs(collection(db, 'blacklist'))
+  return new Set(snap.docs.map(d => d.data().text))
+}
+
+export async function addToBlacklist(text) {
+  const normalized = text.toUpperCase().trim()
+  // Avoid duplicates
+  const q = query(collection(db, 'blacklist'), where('text', '==', normalized))
+  const snap = await getDocs(q)
+  if (!snap.empty) return
+  await addDoc(collection(db, 'blacklist'), {
+    text: normalized,
+    createdAt: serverTimestamp(),
+  })
+}
+
+
 
 // ── Stores ────────────────────────────────────────────────────────────────────
 

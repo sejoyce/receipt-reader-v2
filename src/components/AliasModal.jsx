@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react'
-import { getAllProducts, createProduct, addAliasToProduct } from '../lib/db'
+import { getAllProducts, createProduct, addAliasToProduct, addToBlacklist } from '../lib/db'
 import { CATEGORIES, CATEGORY_ICONS } from '../lib/categories'
+import { Ban } from 'lucide-react'
 
-export default function AliasModal({ unknownItem, onResolved, onSkip }) {
+export default function AliasModal({ unknownItem, onResolved, onSkip, onBlacklist }) {
   const [products, setProducts] = useState([])
   const [mode, setMode] = useState('search')
   const [search, setSearch] = useState('')
@@ -10,6 +11,8 @@ export default function AliasModal({ unknownItem, onResolved, onSkip }) {
   const [newName, setNewName] = useState('')
   const [newCategory, setNewCategory] = useState('')
   const [loading, setLoading] = useState(false)
+  const [blacklisting, setBlacklisting] = useState(false)
+  const [confirmBlacklist, setConfirmBlacklist] = useState(false)
 
   // Reload products on mount
   useEffect(() => { getAllProducts().then(setProducts) }, [])
@@ -21,6 +24,7 @@ export default function AliasModal({ unknownItem, onResolved, onSkip }) {
     setSelected(null)
     setNewName('')
     setNewCategory('')
+    setConfirmBlacklist(false)
   }, [unknownItem?.description])
 
   const filtered = products.filter(p =>
@@ -46,6 +50,38 @@ export default function AliasModal({ unknownItem, onResolved, onSkip }) {
     } finally { setLoading(false) }
   }
 
+  async function handleBlacklist() {
+    setBlacklisting(true)
+    try {
+      await addToBlacklist(unknownItem.description)
+      onBlacklist(unknownItem)
+    } finally { setBlacklisting(false) }
+  }
+
+  // Confirmation step before blacklisting
+  if (confirmBlacklist) {
+    return (
+      <div className="modal-overlay">
+        <div className="modal" style={{ maxWidth: 400, textAlign: 'center' }}>
+          <Ban size={36} color="var(--red)" style={{ marginBottom: 12 }} />
+          <h3 style={{ marginBottom: 8 }}>Never ask about this again?</h3>
+          <p style={{ color: 'var(--ink-light)', fontSize: '0.875rem', marginBottom: 8 }}>
+            <code style={{ background: 'var(--cream-dark)', padding: '2px 8px', borderRadius: 4 }}>{unknownItem.description}</code>
+          </p>
+          <p style={{ color: 'var(--ink-light)', fontSize: '0.875rem', marginBottom: 24 }}>
+            This text will be permanently ignored on all future receipts. It won't be tracked as a product.
+          </p>
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
+            <button className="btn btn-ghost" onClick={() => setConfirmBlacklist(false)}>Go back</button>
+            <button className="btn btn-danger" onClick={handleBlacklist} disabled={blacklisting}>
+              {blacklisting ? <span className="spinner" /> : <Ban size={14} />} Yes, ignore it
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="modal-overlay">
       <div className="modal">
@@ -56,9 +92,17 @@ export default function AliasModal({ unknownItem, onResolved, onSkip }) {
           Map it to a product to track its price over time.
         </p>
 
-        <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap' }}>
           <button className={`btn btn-sm ${mode === 'search' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setMode('search')}>Match existing</button>
-          <button className={`btn btn-sm ${mode === 'create' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setMode('create')}>Create new product</button>
+          <button className={`btn btn-sm ${mode === 'create' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setMode('create')}>Create new</button>
+          <button
+            className="btn btn-sm"
+            onClick={() => setConfirmBlacklist(true)}
+            style={{ marginLeft: 'auto', background: 'var(--red-pale)', color: 'var(--red)', border: '1px solid #f5c6c3', display: 'flex', alignItems: 'center', gap: 5 }}
+            title="Mark as not a product — will be ignored on future receipts"
+          >
+            <Ban size={13} /> Not a product
+          </button>
         </div>
 
         {mode === 'search' && (

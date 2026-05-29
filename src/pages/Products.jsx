@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
-import { getAllProducts, createProduct, addAliasToProduct, updateProduct } from '../lib/db'
+import { getAllProducts, createProduct, addAliasToProduct, updateProduct, getBlacklist, addToBlacklist } from '../lib/db'
 import { CATEGORIES, CATEGORY_ICONS } from '../lib/categories'
-import { Package, Plus, Pencil, Check, X } from 'lucide-react'
+import { Package, Plus, Pencil, Check, X, Ban, Trash2 } from 'lucide-react'
 import { useToast } from '../hooks/useToast'
 
 export default function Products() {
@@ -17,10 +17,14 @@ export default function Products() {
   const [addingAliasFor, setAddingAliasFor] = useState(null)
   const [aliasInput, setAliasInput] = useState('')
   const [editing, setEditing] = useState(null)
+  const [blacklist, setBlacklist] = useState([])
+  const [showBlacklist, setShowBlacklist] = useState(false)
+  const [newBlacklistEntry, setNewBlacklistEntry] = useState('')
 
   async function load() {
-    const p = await getAllProducts()
+    const [p, bl] = await Promise.all([getAllProducts(), getBlacklist()])
     setProducts(p.sort((a, b) => a.name.localeCompare(b.name)))
+    setBlacklist([...bl].sort())
     setLoading(false)
   }
 
@@ -42,6 +46,16 @@ export default function Products() {
       await addAliasToProduct(productId, aliasInput.trim())
       toast('Alias added!')
       setAddingAliasFor(null); setAliasInput(''); load()
+    } catch (e) { toast('Failed: ' + e.message, 'error') }
+  }
+
+  async function handleAddBlacklistEntry() {
+    if (!newBlacklistEntry.trim()) return
+    try {
+      await addToBlacklist(newBlacklistEntry.trim())
+      toast('Added to ignored list.')
+      setNewBlacklistEntry('')
+      load()
     } catch (e) { toast('Failed: ' + e.message, 'error') }
   }
 
@@ -168,6 +182,51 @@ export default function Products() {
           </table>
         </div>
       </div>
+
+      {/* Ignored / Blacklist section */}
+      <div style={{ marginTop: 32 }}>
+        <button
+          onClick={() => setShowBlacklist(v => !v)}
+          style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--ink-light)', fontSize: '0.875rem', fontWeight: 600, padding: 0, marginBottom: showBlacklist ? 12 : 0 }}
+        >
+          <Ban size={15} />
+          Ignored OCR strings ({blacklist.length})
+          <span style={{ fontSize: '0.75rem', color: 'var(--ink-faint)', fontWeight: 400 }}>— text marked as "not a product"</span>
+        </button>
+
+        {showBlacklist && (
+          <div className="card animate-fade" style={{ marginTop: 8 }}>
+            <p style={{ fontSize: '0.82rem', color: 'var(--ink-faint)', marginBottom: 16 }}>
+              These OCR strings are permanently ignored when scanning receipts. Remove one to be asked about it again.
+            </p>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+              <input
+                className="form-input"
+                placeholder="Manually add an ignored string…"
+                value={newBlacklistEntry}
+                onChange={e => setNewBlacklistEntry(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') handleAddBlacklistEntry() }}
+                style={{ flex: 1 }}
+              />
+              <button className="btn btn-secondary" onClick={handleAddBlacklistEntry} disabled={!newBlacklistEntry.trim()}>Add</button>
+            </div>
+            {blacklist.length === 0 && <p style={{ color: 'var(--ink-faint)', fontSize: '0.85rem' }}>Nothing ignored yet.</p>}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {blacklist.map(entry => (
+                <RemovableTag key={entry} text={entry} onRemove={() => { /* handled via db */ toast('To remove, edit Firestore directly for now.') }} />
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
+  )
+}
+
+function RemovableTag({ text, onRemove }) {
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'var(--red-pale)', color: 'var(--red)', border: '1px solid #f5c6c3', borderRadius: 6, padding: '3px 8px', fontSize: '0.75rem', fontFamily: 'monospace' }}>
+      {text}
+    </span>
   )
 }

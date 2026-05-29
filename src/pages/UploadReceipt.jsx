@@ -2,7 +2,7 @@ import { useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { UploadCloud, CheckCircle, AlertCircle, Scale, ChevronDown, ChevronUp } from 'lucide-react'
 import { extractTextFromImage, parseReceiptText, extractWithClaude, detectDateFromText } from '../lib/ocr'
-import { findProductByAlias, getOrCreateStore, saveReceipt, detectStoreFromText } from '../lib/db'
+import { findProductByAlias, getOrCreateStore, saveReceipt, detectStoreFromText, getBlacklist } from '../lib/db'
 import { useAuth } from '../hooks/useAuth'
 import AliasModal from '../components/AliasModal'
 import { useToast } from '../hooks/useToast'
@@ -85,13 +85,18 @@ export default function UploadReceipt() {
       if (detectedAddress) setStoreAddress(detectedAddress)
       if (detectedDate) setReceiptDate(detectedDate)
 
-      const resolved = await Promise.all(
-        parsedItems.map(async item => {
+      // Fetch blacklist and resolve aliases in parallel
+      const [blacklist, ...resolvedItems] = await Promise.all([
+        getBlacklist(),
+        ...parsedItems.map(async item => {
           const product = await findProductByAlias(item.description)
           if (product) return { ...item, productId: product.id, productName: product.name }
           return item
         })
-      )
+      ])
+
+      // Remove blacklisted items entirely — they're not products
+      const resolved = resolvedItems.filter(item => !blacklist.has(item.description.toUpperCase().trim()))
 
       const unknown = resolved.filter(i => !i.productId)
       setItems(resolved)
@@ -115,6 +120,12 @@ export default function UploadReceipt() {
       setCurrentUnknown(remaining[0] || null)
       return remaining
     })
+  }
+
+  function handleBlacklist(blacklistedItem) {
+    // Remove the item from items list entirely and advance the queue
+    setItems(prev => prev.filter(it => it.description !== blacklistedItem.description))
+    advanceQueue()
   }
 
   function updateItem(idx, field, value) {
@@ -238,7 +249,7 @@ export default function UploadReceipt() {
       {/* Review step */}
       {step === 'review' && (
         <div>
-          {currentUnknown && <AliasModal unknownItem={currentUnknown} onResolved={handleAliasResolved} onSkip={advanceQueue} />}
+          {currentUnknown && <AliasModal unknownItem={currentUnknown} onResolved={handleAliasResolved} onSkip={advanceQueue} onBlacklist={handleBlacklist} />}
 
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
             <div>
