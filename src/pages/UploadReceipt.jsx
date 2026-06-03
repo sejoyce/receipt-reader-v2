@@ -1,11 +1,41 @@
 import { useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { UploadCloud, CheckCircle, AlertCircle, Scale, ChevronDown, ChevronUp } from 'lucide-react'
+import { UploadCloud, CheckCircle, AlertCircle, Scale, Plus, ChevronDown, ChevronUp } from 'lucide-react'
 import { extractTextFromImage, parseReceiptText, extractWithClaude, detectDateFromText } from '../lib/ocr'
-import { findProductByAlias, getOrCreateStore, saveReceipt, detectStoreFromText, getBlacklist } from '../lib/db'
+import { findProductByAlias, getOrCreateStore, saveReceipt, detectStoreFromText, getBlacklist, getAllProducts } from '../lib/db'
+import { CATEGORIES, CATEGORY_ICONS } from '../lib/categories'
 import { useAuth } from '../hooks/useAuth'
 import AliasModal from '../components/AliasModal'
 import { useToast } from '../hooks/useToast'
+
+const SIZE_UNITS = ['oz', 'lb', 'kg', 'g', 'ml', 'l', 'fl oz', 'ct', 'pk']
+
+function SizeDisplay({ item }) {
+  if (item.weight && item.pricePerUnit) {
+    const pplb = item.unit === 'lb' ? item.pricePerUnit : (item.pricePerUnit * 16)
+    return (
+      <span style={{ fontSize: '0.78rem', color: 'var(--ink-light)' }}>
+        <Scale size={11} style={{ display:'inline', marginRight:3, verticalAlign:'middle' }} />
+        {item.weight} {item.unit} @ ${item.pricePerUnit.toFixed(2)}/{item.unit}
+        <span style={{ color:'var(--green)', marginLeft:6, fontWeight:600 }}>
+          ${(item.price / (item.weight * (item.unit === 'lb' ? 16 : 1))).toFixed(3)}/oz
+        </span>
+      </span>
+    )
+  }
+  if (item.packageSize) {
+    const oz = item.packageUnit === 'lb' ? item.packageSize * 16 : item.packageSize
+    const poz = (item.price / oz).toFixed(3)
+    return (
+      <span style={{ fontSize: '0.78rem', color: 'var(--ink-light)' }}>
+        {item.packageSize} {item.packageUnit}
+        <span style={{ color:'var(--green)', marginLeft:6, fontWeight:600 }}>${poz}/oz</span>
+      </span>
+    )
+  }
+  if (item.quantity > 1) return <span style={{ fontSize: '0.78rem', color: 'var(--ink-light)' }}>×{item.quantity}</span>
+  return <span style={{ fontSize: '0.78rem', color: 'var(--ink-faint)' }}>—</span>
+}
 
 export default function UploadReceipt() {
   const navigate = useNavigate()
@@ -19,7 +49,6 @@ export default function UploadReceipt() {
   const [ocrProgress, setOcrProgress] = useState(0)
   const [ocrMethod, setOcrMethod] = useState('tesseract')
 
-  // Receipt metadata — hidden initially, revealed via "Edit details" toggle
   const [storeName, setStoreName] = useState('')
   const [storeAddress, setStoreAddress] = useState('')
   const [receiptDate, setReceiptDate] = useState('')
@@ -32,34 +61,30 @@ export default function UploadReceipt() {
   const [unknownQueue, setUnknownQueue] = useState([])
   const [currentUnknown, setCurrentUnknown] = useState(null)
 
+  // Manual add item panel
+  const [showAddItem, setShowAddItem] = useState(false)
+  const [allProducts, setAllProducts] = useState([])
+  const [newItem, setNewItem] = useState({ productId: '', productName: '', price: '', packageSize: '', packageUnit: 'oz', quantity: 1 })
+  const [productSearch, setProductSearch] = useState('')
+
   function handleFileChange(e) {
     const file = e.target.files?.[0]
     if (!file) return
-    setImageFile(file)
-    setImagePreview(URL.createObjectURL(file))
-    setStoreAutoDetected(false)
-    setDateAutoDetected(false)
+    setImageFile(file); setImagePreview(URL.createObjectURL(file))
+    setStoreAutoDetected(false); setDateAutoDetected(false)
   }
 
   function handleDrop(e) {
     e.preventDefault()
     const file = e.dataTransfer.files?.[0]
-    if (file?.type.startsWith('image/')) {
-      setImageFile(file)
-      setImagePreview(URL.createObjectURL(file))
-    }
+    if (file?.type.startsWith('image/')) { setImageFile(file); setImagePreview(URL.createObjectURL(file)) }
   }
 
   async function processReceipt() {
     if (!imageFile) return
-    setStep('processing')
-    setOcrProgress(0)
-
+    setStep('processing'); setOcrProgress(0)
     try {
-      let parsedItems = []
-      let detectedStore = storeName
-      let detectedAddress = storeAddress
-      let detectedDate = receiptDate
+      let parsedItems = [], detectedStore = storeName, detectedAddress = storeAddress, detectedDate = receiptDate
 
       if (ocrMethod === 'claude' && import.meta.env.VITE_ANTHROPIC_API_KEY) {
         const result = await extractWithClaude(imageFile)
@@ -85,7 +110,6 @@ export default function UploadReceipt() {
       if (detectedAddress) setStoreAddress(detectedAddress)
       if (detectedDate) setReceiptDate(detectedDate)
 
-      // Fetch blacklist and resolve aliases in parallel
       const [blacklist, ...resolvedItems] = await Promise.all([
         getBlacklist(),
         ...parsedItems.map(async item => {
@@ -95,17 +119,13 @@ export default function UploadReceipt() {
         })
       ])
 
-      // Remove blacklisted items entirely — they're not products
       const resolved = resolvedItems.filter(item => !blacklist.has(item.description.toUpperCase().trim()))
-
       const unknown = resolved.filter(i => !i.productId)
       setItems(resolved)
       if (unknown.length > 0) { setUnknownQueue(unknown); setCurrentUnknown(unknown[0]) }
       setStep('review')
     } catch (err) {
-      console.error(err)
-      toast('OCR failed: ' + err.message, 'error')
-      setStep('upload')
+      console.error(err); toast('OCR failed: ' + err.message, 'error'); setStep('upload')
     }
   }
 
@@ -116,14 +136,11 @@ export default function UploadReceipt() {
 
   function advanceQueue() {
     setUnknownQueue(prev => {
-      const remaining = prev.slice(1)
-      setCurrentUnknown(remaining[0] || null)
-      return remaining
+      const remaining = prev.slice(1); setCurrentUnknown(remaining[0] || null); return remaining
     })
   }
 
   function handleBlacklist(blacklistedItem) {
-    // Remove the item from items list entirely and advance the queue
     setItems(prev => prev.filter(it => it.description !== blacklistedItem.description))
     advanceQueue()
   }
@@ -136,22 +153,41 @@ export default function UploadReceipt() {
     setItems(prev => prev.filter((_, i) => i !== idx))
   }
 
+  async function openAddItem() {
+    const prods = await getAllProducts()
+    setAllProducts(prods.sort((a,b) => a.name.localeCompare(b.name)))
+    setNewItem({ productId: '', productName: '', price: '', packageSize: '', packageUnit: 'oz', quantity: 1 })
+    setProductSearch('')
+    setShowAddItem(true)
+  }
+
+  function handleAddItem() {
+    if (!newItem.productId || !newItem.price) { toast('Select a product and enter a price', 'error'); return }
+    const item = {
+      rawText: '[manual]',
+      description: newItem.productName,
+      productId: newItem.productId,
+      productName: newItem.productName,
+      price: parseFloat(newItem.price),
+      quantity: parseInt(newItem.quantity) || 1,
+      packageSize: newItem.packageSize ? parseFloat(newItem.packageSize) : null,
+      packageUnit: newItem.packageSize ? newItem.packageUnit : '',
+      weight: null, pricePerUnit: null, unit: newItem.packageUnit || '',
+    }
+    setItems(prev => [...prev, item])
+    setShowAddItem(false)
+    toast('Item added manually.')
+  }
+
   async function handleSave() {
     if (!storeName.trim()) { toast('Please enter a store name in receipt details', 'error'); setShowDetails(true); return }
     setStep('saving')
     try {
       const store = await getOrCreateStore(storeName, storeAddress)
-      await saveReceipt({
-        storeId: store.id, storeName: store.name, storeAddress,
-        date: receiptDate || null, items,
-        uploadedBy: uploadedBy || user?.email || 'unknown',
-      })
-      setStep('done')
-      toast('Receipt saved!')
+      await saveReceipt({ storeId: store.id, storeName: store.name, storeAddress, date: receiptDate || null, items, uploadedBy: uploadedBy || user?.email || 'unknown' })
+      setStep('done'); toast('Receipt saved!')
     } catch (err) {
-      console.error(err)
-      toast('Failed to save: ' + err.message, 'error')
-      setStep('review')
+      console.error(err); toast('Failed to save: ' + err.message, 'error'); setStep('review')
     }
   }
 
@@ -159,8 +195,13 @@ export default function UploadReceipt() {
     setStep('upload'); setImageFile(null); setImagePreview(null); setItems([])
     setStoreName(''); setStoreAddress(''); setReceiptDate('')
     setStoreAutoDetected(false); setDateAutoDetected(false); setShowDetails(false)
-    setUnknownQueue([]); setCurrentUnknown(null)
+    setUnknownQueue([]); setCurrentUnknown(null); setShowAddItem(false)
   }
+
+  const filteredProducts = allProducts.filter(p =>
+    !productSearch || p.name.toLowerCase().includes(productSearch.toLowerCase()) ||
+    (p.aliases||[]).some(a => a.toLowerCase().includes(productSearch.toLowerCase()))
+  )
 
   if (step === 'done') {
     return (
@@ -168,8 +209,7 @@ export default function UploadReceipt() {
         <CheckCircle size={56} color="var(--green)" style={{ marginBottom: 16 }} />
         <h2 style={{ marginBottom: 8 }}>Receipt saved!</h2>
         <p style={{ color: 'var(--ink-light)', marginBottom: 28 }}>
-          {items.filter(i => i.productId).length} items tracked
-          {items.filter(i => !i.productId).length > 0 && `, ${items.filter(i => !i.productId).length} skipped`}.
+          {items.filter(i => i.productId).length} items tracked{items.filter(i => !i.productId).length > 0 && `, ${items.filter(i => !i.productId).length} skipped`}.
         </p>
         <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }}>
           <button className="btn btn-secondary" onClick={reset}>Upload another</button>
@@ -188,17 +228,16 @@ export default function UploadReceipt() {
 
       {/* Step indicators */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 28, alignItems: 'center' }}>
-        {['Upload', 'Process', 'Review', 'Save'].map((label, i) => {
-          const stepMap = ['upload', 'processing', 'review', 'saving']
-          const idx = stepMap.indexOf(step)
-          const active = i === idx, done = i < idx
+        {['Upload','Process','Review','Save'].map((label, i) => {
+          const stepMap = ['upload','processing','review','saving']
+          const idx = stepMap.indexOf(step), active = i === idx, done = i < idx
           return (
             <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <div style={{ width: 24, height: 24, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.7rem', fontWeight: 700, background: done ? 'var(--green)' : active ? 'var(--ink)' : 'var(--border)', color: done || active ? 'white' : 'var(--ink-faint)' }}>
-                {done ? '✓' : i + 1}
+              <div style={{ width:24, height:24, borderRadius:'50%', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'0.7rem', fontWeight:700, background: done?'var(--green)':active?'var(--ink)':'var(--border)', color: done||active?'white':'var(--ink-faint)' }}>
+                {done ? '✓' : i+1}
               </div>
-              <span style={{ fontSize: '0.8rem', color: active ? 'var(--ink)' : 'var(--ink-faint)', fontWeight: active ? 600 : 400 }}>{label}</span>
-              {i < 3 && <div style={{ width: 24, height: 1, background: 'var(--border)' }} />}
+              <span style={{ fontSize:'0.8rem', color:active?'var(--ink)':'var(--ink-faint)', fontWeight:active?600:400 }}>{label}</span>
+              {i < 3 && <div style={{ width:24, height:1, background:'var(--border)' }} />}
             </div>
           )
         })}
@@ -207,24 +246,21 @@ export default function UploadReceipt() {
       {/* Upload step */}
       {step === 'upload' && (
         <div style={{ maxWidth: 480 }}>
-          <div onDrop={handleDrop} onDragOver={e => e.preventDefault()} onClick={() => fileRef.current?.click()}
-            style={{ border: `2px dashed ${imageFile ? 'var(--green)' : 'var(--border)'}`, borderRadius: 'var(--radius-lg)', padding: '40px 24px', textAlign: 'center', cursor: 'pointer', background: imageFile ? 'var(--green-pale)' : 'var(--cream)', transition: 'all 0.2s', marginBottom: 16 }}>
+          <div onDrop={handleDrop} onDragOver={e=>e.preventDefault()} onClick={() => fileRef.current?.click()}
+            style={{ border:`2px dashed ${imageFile?'var(--green)':'var(--border)'}`, borderRadius:'var(--radius-lg)', padding:'40px 24px', textAlign:'center', cursor:'pointer', background:imageFile?'var(--green-pale)':'var(--cream)', transition:'all 0.2s', marginBottom:16 }}>
             {imagePreview
-              ? <img src={imagePreview} alt="receipt" style={{ maxHeight: 220, maxWidth: '100%', borderRadius: 8, objectFit: 'contain' }} />
-              : <><UploadCloud size={36} color="var(--ink-faint)" style={{ marginBottom: 12 }} /><p style={{ fontWeight: 600, marginBottom: 4 }}>Drop receipt image here</p><p style={{ fontSize: '0.8rem', color: 'var(--ink-faint)' }}>or click to browse · JPG, PNG, WEBP</p></>
-            }
+              ? <img src={imagePreview} alt="receipt" style={{ maxHeight:220, maxWidth:'100%', borderRadius:8, objectFit:'contain' }} />
+              : <><UploadCloud size={36} color="var(--ink-faint)" style={{ marginBottom:12 }} /><p style={{ fontWeight:600, marginBottom:4 }}>Drop receipt image here</p><p style={{ fontSize:'0.8rem', color:'var(--ink-faint)' }}>or click to browse · JPG, PNG, WEBP</p></>}
           </div>
-          <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={handleFileChange} style={{ display: 'none' }} />
-
-          <div className="form-group" style={{ marginBottom: 16 }}>
+          <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={handleFileChange} style={{ display:'none' }} />
+          <div className="form-group" style={{ marginBottom:16 }}>
             <label className="form-label">Extraction Method</label>
-            <select className="form-select" value={ocrMethod} onChange={e => setOcrMethod(e.target.value)}>
+            <select className="form-select" value={ocrMethod} onChange={e=>setOcrMethod(e.target.value)}>
               <option value="tesseract">Tesseract OCR (free, local)</option>
               <option value="claude" disabled={!import.meta.env.VITE_ANTHROPIC_API_KEY}>Claude Vision (requires API key)</option>
             </select>
           </div>
-
-          <button className="btn btn-primary" style={{ width: '100%', justifyContent: 'center' }} disabled={!imageFile} onClick={processReceipt}>
+          <button className="btn btn-primary" style={{ width:'100%', justifyContent:'center' }} disabled={!imageFile} onClick={processReceipt}>
             <UploadCloud size={16} /> Process Receipt
           </button>
         </div>
@@ -232,14 +268,14 @@ export default function UploadReceipt() {
 
       {/* Processing step */}
       {step === 'processing' && (
-        <div style={{ textAlign: 'center', padding: '80px 20px' }}>
-          <div className="spinner" style={{ width: 40, height: 40, borderWidth: 3, margin: '0 auto 20px' }} />
-          <h3 style={{ marginBottom: 8 }}>Reading your receipt…</h3>
+        <div style={{ textAlign:'center', padding:'80px 20px' }}>
+          <div className="spinner" style={{ width:40, height:40, borderWidth:3, margin:'0 auto 20px' }} />
+          <h3 style={{ marginBottom:8 }}>Reading your receipt…</h3>
           {ocrMethod === 'tesseract' && ocrProgress > 0 && (
             <>
-              <p style={{ color: 'var(--ink-light)', marginBottom: 12 }}>{ocrProgress}% complete</p>
-              <div style={{ width: 240, height: 6, background: 'var(--border)', borderRadius: 3, margin: '0 auto' }}>
-                <div style={{ width: `${ocrProgress}%`, height: '100%', background: 'var(--green)', borderRadius: 3, transition: 'width 0.2s' }} />
+              <p style={{ color:'var(--ink-light)', marginBottom:12 }}>{ocrProgress}% complete</p>
+              <div style={{ width:240, height:6, background:'var(--border)', borderRadius:3, margin:'0 auto' }}>
+                <div style={{ width:`${ocrProgress}%`, height:'100%', background:'var(--green)', borderRadius:3, transition:'width 0.2s' }} />
               </div>
             </>
           )}
@@ -251,81 +287,144 @@ export default function UploadReceipt() {
         <div>
           {currentUnknown && <AliasModal unknownItem={currentUnknown} onResolved={handleAliasResolved} onSkip={advanceQueue} onBlacklist={handleBlacklist} />}
 
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          {/* Manual add item modal */}
+          {showAddItem && (
+            <div className="modal-overlay">
+              <div className="modal" style={{ maxWidth: 480 }}>
+                <h3 style={{ marginBottom:4 }}>Add item manually</h3>
+                <p style={{ color:'var(--ink-light)', fontSize:'0.85rem', marginBottom:20 }}>Use this for items Tesseract missed on the receipt.</p>
+
+                <div className="form-group">
+                  <label className="form-label">Product *</label>
+                  <input className="form-input" placeholder="Search products…" value={productSearch} onChange={e=>setProductSearch(e.target.value)} autoFocus style={{ marginBottom:8 }} />
+                  <div style={{ maxHeight:180, overflowY:'auto', border:'1px solid var(--border)', borderRadius:8, background:'white' }}>
+                    {filteredProducts.length === 0 && <p style={{ padding:'12px 16px', color:'var(--ink-faint)', fontSize:'0.85rem' }}>No products found — create one on the Products page first.</p>}
+                    {filteredProducts.map(p => (
+                      <button key={p.id} onClick={() => { setNewItem(v => ({ ...v, productId:p.id, productName:p.name })); setProductSearch(p.name) }}
+                        style={{ display:'block', width:'100%', textAlign:'left', padding:'10px 14px', background: newItem.productId===p.id?'var(--green-pale)':'transparent', border:'none', borderBottom:'1px solid var(--cream-dark)', cursor:'pointer', fontSize:'0.875rem' }}>
+                        <div style={{ fontWeight:600 }}>{p.name}</div>
+                        {p.category && <div style={{ fontSize:'0.72rem', color:'var(--ink-faint)' }}>{CATEGORY_ICONS[p.category]} {p.category}</div>}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginTop:4 }}>
+                  <div className="form-group" style={{ marginBottom:0 }}>
+                    <label className="form-label">Price *</label>
+                    <input className="form-input" type="number" step="0.01" min="0" placeholder="0.00" value={newItem.price} onChange={e=>setNewItem(v=>({...v,price:e.target.value}))} />
+                  </div>
+                  <div className="form-group" style={{ marginBottom:0 }}>
+                    <label className="form-label">Quantity</label>
+                    <input className="form-input" type="number" min="1" value={newItem.quantity} onChange={e=>setNewItem(v=>({...v,quantity:e.target.value}))} />
+                  </div>
+                  <div className="form-group" style={{ marginBottom:0 }}>
+                    <label className="form-label">Package Size</label>
+                    <input className="form-input" type="number" step="0.01" min="0" placeholder="e.g. 18" value={newItem.packageSize} onChange={e=>setNewItem(v=>({...v,packageSize:e.target.value}))} />
+                  </div>
+                  <div className="form-group" style={{ marginBottom:0 }}>
+                    <label className="form-label">Unit</label>
+                    <select className="form-select" value={newItem.packageUnit} onChange={e=>setNewItem(v=>({...v,packageUnit:e.target.value}))}>
+                      {SIZE_UNITS.map(u => <option key={u} value={u}>{u}</option>)}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="modal-actions">
+                  <button className="btn btn-ghost" onClick={() => setShowAddItem(false)}>Cancel</button>
+                  <button className="btn btn-primary" onClick={handleAddItem} disabled={!newItem.productId || !newItem.price}>
+                    <Plus size={14} /> Add item
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
             <div>
-              <h3 style={{ fontSize: '1.1rem' }}>Review Items ({items.length})</h3>
-              <p style={{ fontSize: '0.8rem', color: 'var(--ink-faint)' }}>
-                {items.filter(i => i.productId).length} resolved · {items.filter(i => !i.productId).length} unknown
-                {items.filter(i => i.weight).length > 0 && ` · ${items.filter(i => i.weight).length} by weight`}
+              <h3 style={{ fontSize:'1.1rem' }}>Review Items ({items.length})</h3>
+              <p style={{ fontSize:'0.8rem', color:'var(--ink-faint)' }}>
+                {items.filter(i=>i.productId).length} resolved · {items.filter(i=>!i.productId).length} unknown
+                {items.filter(i=>i.weight||i.packageSize).length > 0 && ` · ${items.filter(i=>i.weight||i.packageSize).length} with size`}
               </p>
             </div>
-            <div style={{ display: 'flex', gap: 8 }}>
+            <div style={{ display:'flex', gap:8 }}>
               <button className="btn btn-secondary btn-sm" onClick={() => setStep('upload')}>← Back</button>
-              <button className="btn btn-primary" onClick={handleSave} disabled={items.filter(i => i.productId).length === 0}>Save Receipt</button>
+              <button className="btn btn-ghost btn-sm" onClick={openAddItem}><Plus size={14} /> Add item</button>
+              <button className="btn btn-primary" onClick={handleSave} disabled={items.filter(i=>i.productId).length === 0}>Save Receipt</button>
             </div>
           </div>
 
           {/* Collapsible receipt details */}
-          <div className="card" style={{ marginBottom: 16, padding: 0, overflow: 'hidden' }}>
-            <button onClick={() => setShowDetails(v => !v)} style={{ width: '100%', padding: '14px 20px', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', textAlign: 'left' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 16, flex: 1 }}>
+          <div className="card" style={{ marginBottom:16, padding:0, overflow:'hidden' }}>
+            <button onClick={() => setShowDetails(v=>!v)} style={{ width:'100%', padding:'14px 20px', background:'none', border:'none', cursor:'pointer', display:'flex', justifyContent:'space-between', alignItems:'center', textAlign:'left' }}>
+              <div style={{ display:'flex', alignItems:'center', gap:16, flex:1 }}>
                 <div>
-                  <span style={{ fontWeight: 600, fontSize: '0.9rem' }}>
-                    {storeName || <span style={{ color: 'var(--red)', fontWeight: 600 }}>⚠ Store name required</span>}
+                  <span style={{ fontWeight:600, fontSize:'0.9rem' }}>
+                    {storeName || <span style={{ color:'var(--red)', fontWeight:600 }}>⚠ Store name required</span>}
                   </span>
-                  {storeAddress && <span style={{ fontSize: '0.78rem', color: 'var(--ink-faint)', marginLeft: 10 }}>{storeAddress}</span>}
+                  {storeAddress && <span style={{ fontSize:'0.78rem', color:'var(--ink-faint)', marginLeft:10 }}>{storeAddress}</span>}
                 </div>
-                <div style={{ display: 'flex', gap: 6 }}>
-                  {storeAutoDetected && <span className="badge badge-green" style={{ fontSize: '0.65rem' }}>Store detected</span>}
-                  {dateAutoDetected && <span className="badge badge-green" style={{ fontSize: '0.65rem' }}>Date detected</span>}
+                <div style={{ display:'flex', gap:6 }}>
+                  {storeAutoDetected && <span className="badge badge-green" style={{ fontSize:'0.65rem' }}>Store detected</span>}
+                  {dateAutoDetected && <span className="badge badge-green" style={{ fontSize:'0.65rem' }}>Date detected</span>}
                 </div>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                {receiptDate && <span style={{ fontSize: '0.82rem', color: 'var(--ink-light)' }}>{receiptDate}</span>}
-                <span style={{ fontSize: '0.78rem', color: 'var(--green)' }}>Edit details</span>
+              <div style={{ display:'flex', alignItems:'center', gap:12 }}>
+                {receiptDate && <span style={{ fontSize:'0.82rem', color:'var(--ink-light)' }}>{receiptDate}</span>}
+                <span style={{ fontSize:'0.78rem', color:'var(--green)' }}>Edit details</span>
                 {showDetails ? <ChevronUp size={16} color="var(--ink-faint)" /> : <ChevronDown size={16} color="var(--ink-faint)" />}
               </div>
             </button>
             {showDetails && (
-              <div style={{ padding: '0 20px 20px', borderTop: '1px solid var(--cream-dark)', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }} className="animate-fade">
-                <div className="form-group" style={{ marginBottom: 0 }}>
+              <div style={{ padding:'0 20px 20px', borderTop:'1px solid var(--cream-dark)', display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }} className="animate-fade">
+                <div className="form-group" style={{ marginBottom:0 }}>
                   <label className="form-label">Store Name *</label>
-                  <input className="form-input" placeholder="e.g. Wegmans" value={storeName} onChange={e => { setStoreName(e.target.value); setStoreAutoDetected(false) }} />
+                  <input className="form-input" placeholder="e.g. Wegmans" value={storeName} onChange={e=>{ setStoreName(e.target.value); setStoreAutoDetected(false) }} />
                 </div>
-                <div className="form-group" style={{ marginBottom: 0 }}>
+                <div className="form-group" style={{ marginBottom:0 }}>
                   <label className="form-label">Date</label>
-                  <input className="form-input" type="date" value={receiptDate} onChange={e => { setReceiptDate(e.target.value); setDateAutoDetected(false) }} />
+                  <input className="form-input" type="date" value={receiptDate} onChange={e=>{ setReceiptDate(e.target.value); setDateAutoDetected(false) }} />
                 </div>
-                <div className="form-group" style={{ marginBottom: 0, gridColumn: '1 / -1' }}>
+                <div className="form-group" style={{ marginBottom:0, gridColumn:'1 / -1' }}>
                   <label className="form-label">Store Address</label>
-                  <input className="form-input" placeholder="e.g. 371 Buckley Mill Rd, Wilmington, DE" value={storeAddress} onChange={e => setStoreAddress(e.target.value)} />
+                  <input className="form-input" placeholder="e.g. 371 Buckley Mill Rd, Wilmington, DE" value={storeAddress} onChange={e=>setStoreAddress(e.target.value)} />
                 </div>
-                <div className="form-group" style={{ marginBottom: 0 }}>
+                <div className="form-group" style={{ marginBottom:0 }}>
                   <label className="form-label">Uploaded by</label>
-                  <input className="form-input" placeholder="Your name" value={uploadedBy} onChange={e => setUploadedBy(e.target.value)} />
+                  <input className="form-input" placeholder="Your name" value={uploadedBy} onChange={e=>setUploadedBy(e.target.value)} />
                 </div>
               </div>
             )}
           </div>
 
           {items.length === 0 && (
-            <div className="card"><div className="empty-state"><AlertCircle size={32} /><h3>No items detected</h3><p style={{ fontSize: '0.85rem' }}>Try re-uploading a clearer image.</p></div></div>
+            <div className="card">
+              <div className="empty-state">
+                <AlertCircle size={32} />
+                <h3>No items detected</h3>
+                <p style={{ fontSize:'0.85rem' }}>Try re-uploading a clearer image, or add items manually.</p>
+                <button className="btn btn-primary btn-sm" onClick={openAddItem}><Plus size={14} /> Add item manually</button>
+              </div>
+            </div>
           )}
 
           {items.length > 0 && (
-            <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+            <div className="card" style={{ padding:0, overflow:'hidden' }}>
               <div className="table-wrap">
                 <table>
                   <thead>
-                    <tr><th>Raw Text</th><th>Product</th><th>Size/Weight</th><th>Price</th><th></th></tr>
+                    <tr><th>Raw Text</th><th>Product</th><th>Size / Weight</th><th>Price</th><th></th></tr>
                   </thead>
                   <tbody>
                     {items.map((item, idx) => (
                       <tr key={idx}>
                         <td>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <div style={{ display:'flex', alignItems:'center', gap:6 }}>
                             {item.weight && <Scale size={13} color="var(--amber)" title="Sold by weight" />}
-                            <code style={{ fontSize: '0.78rem', background: 'var(--cream-dark)', padding: '2px 6px', borderRadius: 4 }}>{item.description}</code>
+                            <code style={{ fontSize:'0.78rem', background:'var(--cream-dark)', padding:'2px 6px', borderRadius:4 }}>
+                              {item.rawText === '[manual]' ? '(manual)' : item.description}
+                            </code>
                           </div>
                         </td>
                         <td>
@@ -333,18 +432,12 @@ export default function UploadReceipt() {
                             ? <span className="badge badge-green">{item.productName}</span>
                             : <span className="badge badge-amber">Unknown</span>}
                         </td>
-                        <td style={{ fontSize: '0.8rem', color: 'var(--ink-light)' }}>
-                          {item.weight
-                            ? `${item.weight} ${item.unit} @ $${item.pricePerUnit}/${item.unit}`
-                            : item.packageSize
-                              ? `${item.packageSize} ${item.packageUnit}`
-                              : item.quantity > 1 ? `×${item.quantity}` : '—'}
-                        </td>
+                        <td><SizeDisplay item={item} /></td>
                         <td>
-                          <input type="number" step="0.01" min="0" value={item.price ?? ''} onChange={e => updateItem(idx, 'price', parseFloat(e.target.value))}
-                            style={{ width: 80, padding: '4px 8px', border: '1px solid var(--border)', borderRadius: 6, fontSize: '0.85rem' }} />
+                          <input type="number" step="0.01" min="0" value={item.price ?? ''} onChange={e=>updateItem(idx,'price',parseFloat(e.target.value))}
+                            style={{ width:80, padding:'4px 8px', border:'1px solid var(--border)', borderRadius:6, fontSize:'0.85rem' }} />
                         </td>
-                        <td><button className="btn btn-danger btn-sm" onClick={() => removeItem(idx)}>✕</button></td>
+                        <td><button className="btn btn-danger btn-sm" onClick={()=>removeItem(idx)}>✕</button></td>
                       </tr>
                     ))}
                   </tbody>
@@ -356,8 +449,8 @@ export default function UploadReceipt() {
       )}
 
       {step === 'saving' && (
-        <div style={{ textAlign: 'center', padding: '80px 20px' }}>
-          <div className="spinner" style={{ width: 40, height: 40, borderWidth: 3, margin: '0 auto 20px' }} />
+        <div style={{ textAlign:'center', padding:'80px 20px' }}>
+          <div className="spinner" style={{ width:40, height:40, borderWidth:3, margin:'0 auto 20px' }} />
           <h3>Saving to Firestore…</h3>
         </div>
       )}

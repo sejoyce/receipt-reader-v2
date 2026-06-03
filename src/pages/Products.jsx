@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import { getAllProducts, createProduct, addAliasToProduct, updateProduct, getBlacklist, addToBlacklist } from '../lib/db'
 import { CATEGORIES, CATEGORY_ICONS } from '../lib/categories'
-import { Package, Plus, Pencil, Check, X, Ban, Trash2 } from 'lucide-react'
+import { Package, Plus, Pencil, Check, X, Ban } from 'lucide-react'
+
+const SIZE_UNITS = ['oz', 'lb', 'kg', 'g', 'ml', 'l', 'fl oz', 'ct', 'pk']
 import { useToast } from '../hooks/useToast'
 
 export default function Products() {
@@ -12,6 +14,8 @@ export default function Products() {
   const [newName, setNewName] = useState('')
   const [newCategory, setNewCategory] = useState('')
   const [newAlias, setNewAlias] = useState('')
+  const [newSize, setNewSize] = useState('')
+  const [newSizeUnit, setNewSizeUnit] = useState('oz')
   const [filter, setFilter] = useState('')
   const [filterCategory, setFilterCategory] = useState('')
   const [addingAliasFor, setAddingAliasFor] = useState(null)
@@ -33,9 +37,9 @@ export default function Products() {
   async function handleCreate() {
     if (!newName.trim()) return
     try {
-      await createProduct({ name: newName.trim(), category: newCategory, aliases: newAlias ? [newAlias.trim()] : [] })
+      await createProduct({ name: newName.trim(), category: newCategory, aliases: newAlias ? [newAlias.trim()] : [], defaultSize: newSize ? parseFloat(newSize) : null, defaultUnit: newSize ? newSizeUnit : '' })
       toast('Product created!')
-      setNewName(''); setNewCategory(''); setNewAlias('')
+      setNewName(''); setNewCategory(''); setNewAlias(''); setNewSize(''); setNewSizeUnit('oz')
       setShowCreate(false); load()
     } catch (e) { toast('Failed: ' + e.message, 'error') }
   }
@@ -62,7 +66,7 @@ export default function Products() {
   async function handleSaveEdit() {
     if (!editing || !editing.name.trim()) return
     try {
-      await updateProduct(editing.id, { name: editing.name.trim(), category: editing.category })
+      await updateProduct(editing.id, { name: editing.name.trim(), category: editing.category, defaultSize: editing.defaultSize ? parseFloat(editing.defaultSize) : null, defaultUnit: editing.defaultUnit || '' })
       toast('Product updated!')
       setEditing(null); load()
     } catch (e) { toast('Failed: ' + e.message, 'error') }
@@ -112,6 +116,19 @@ export default function Products() {
               <label className="form-label">Initial Alias (optional)</label>
               <input className="form-input" placeholder="e.g. BANANAS" value={newAlias} onChange={e => setNewAlias(e.target.value)} />
             </div>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+              <div className="form-group" style={{ marginBottom:0 }}>
+                <label className="form-label">Default Size</label>
+                <input className="form-input" type="number" step="0.01" min="0" placeholder="e.g. 18" value={newSize} onChange={e => setNewSize(e.target.value)} />
+              </div>
+              <div className="form-group" style={{ marginBottom:0 }}>
+                <label className="form-label">Unit</label>
+                <select className="form-select" value={newSizeUnit} onChange={e => setNewSizeUnit(e.target.value)}>
+                  {SIZE_UNITS.map(u => <option key={u} value={u}>{u}</option>)}
+                </select>
+              </div>
+            </div>
+            <p style={{ fontSize:'0.78rem', color:'var(--ink-faint)', marginTop:4 }}>Size is used to calculate price per oz when comparing products.</p>
             <div className="modal-actions">
               <button className="btn btn-ghost" onClick={() => setShowCreate(false)}>Cancel</button>
               <button className="btn btn-primary" onClick={handleCreate} disabled={!newName.trim()}>Create Product</button>
@@ -128,7 +145,7 @@ export default function Products() {
         <div className="table-wrap">
           <table>
             <thead>
-              <tr><th>Product</th><th>Category</th><th>Aliases</th><th></th></tr>
+              <tr><th>Product</th><th>Category</th><th>Default Size</th><th>Aliases</th><th></th></tr>
             </thead>
             <tbody>
               {filtered.map(p => {
@@ -149,6 +166,18 @@ export default function Products() {
                         : p.category
                           ? <span style={{ fontSize: '0.82rem' }}>{CATEGORY_ICONS[p.category]} {p.category}</span>
                           : <span style={{ color: 'var(--ink-faint)' }}>—</span>}
+                    </td>
+                    <td>
+                      {isEditing
+                        ? <div style={{ display:'flex', gap:6, alignItems:'center' }}>
+                            <input className="form-input" type="number" step="0.01" min="0" placeholder="size" value={editing.defaultSize} onChange={e => setEditing(v => ({ ...v, defaultSize: e.target.value }))} style={{ width:70, padding:'5px 8px', fontSize:'0.85rem' }} />
+                            <select className="form-select" style={{ padding:'5px 8px', fontSize:'0.85rem', width:70 }} value={editing.defaultUnit} onChange={e => setEditing(v => ({ ...v, defaultUnit: e.target.value }))}>
+                              {SIZE_UNITS.map(u => <option key={u} value={u}>{u}</option>)}
+                            </select>
+                          </div>
+                        : p.defaultSize
+                          ? <span className="badge badge-gray">{p.defaultSize} {p.defaultUnit}</span>
+                          : <span style={{ color:'var(--ink-faint)' }}>—</span>}
                     </td>
                     <td>
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>

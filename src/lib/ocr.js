@@ -220,7 +220,24 @@ export function parseReceiptText(rawText) {
       const qtyMatch = description.match(/^(\d+)\s+[@x]\s+/i)
       if (qtyMatch) { quantity = parseInt(qtyMatch[1]); description = description.replace(qtyMatch[0], '').trim() }
 
-      items.push({ rawText: line, description: description.toUpperCase(), price, quantity, unit: '', pricePerUnit: null, weight: null, productId: null, productName: null })
+      // Extract fixed package size from description suffix
+      // e.g. "BLUEBERRIES 18 OZ" → packageSize:18, packageUnit:"oz", cleanDesc:"BLUEBERRIES"
+      // e.g. "STRAWBERRIES 1LB" → packageSize:1, packageUnit:"lb", cleanDesc:"STRAWBERRIES"
+      let packageSize = null, packageUnit = ''
+      const pkgMatch = description.match(/^(.+?)\s+(\d+\.?\d*)\s*(oz|lb|lbs|kg|g|ct|count|pk|pack|ml|l|fl\s*oz)\s*$/i)
+      if (pkgMatch) {
+        const cleanDesc = pkgMatch[1].trim()
+        const size = parseFloat(pkgMatch[2])
+        const unit = pkgMatch[3].toLowerCase().replace('lbs','lb').replace(/\s+/,'')
+        // Only treat as package if the base description is at least 3 chars
+        if (cleanDesc.length >= 3) {
+          packageSize = size
+          packageUnit = unit
+          description = cleanDesc
+        }
+      }
+
+      items.push({ rawText: line, description: description.toUpperCase(), price, quantity, unit: packageUnit, pricePerUnit: null, weight: null, packageSize, packageUnit, productId: null, productName: null })
     }
 
     i++

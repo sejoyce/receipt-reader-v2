@@ -11,10 +11,12 @@ export async function getAllProducts() {
   return snap.docs.map(d => ({ id: d.id, ...d.data() }))
 }
 
-export async function createProduct({ name, category, aliases = [] }) {
+export async function createProduct({ name, category, aliases = [], defaultSize = null, defaultUnit = '' }) {
   const ref = await addDoc(collection(db, 'products'), {
     name, category: category || 'Other',
     aliases: aliases.map(a => a.toUpperCase().trim()),
+    defaultSize: defaultSize || null,
+    defaultUnit: defaultUnit || '',
     createdAt: serverTimestamp(),
   })
   return ref.id

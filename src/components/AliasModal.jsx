@@ -3,6 +3,8 @@ import { getAllProducts, createProduct, addAliasToProduct, addToBlacklist } from
 import { CATEGORIES, CATEGORY_ICONS } from '../lib/categories'
 import { Ban } from 'lucide-react'
 
+const SIZE_UNITS = ['oz', 'lb', 'kg', 'g', 'ml', 'l', 'fl oz', 'ct', 'pk']
+
 export default function AliasModal({ unknownItem, onResolved, onSkip, onBlacklist }) {
   const [products, setProducts] = useState([])
   const [mode, setMode] = useState('search')
@@ -10,6 +12,8 @@ export default function AliasModal({ unknownItem, onResolved, onSkip, onBlacklis
   const [selected, setSelected] = useState(null)
   const [newName, setNewName] = useState('')
   const [newCategory, setNewCategory] = useState('')
+  const [newSize, setNewSize] = useState('')
+  const [newSizeUnit, setNewSizeUnit] = useState('oz')
   const [loading, setLoading] = useState(false)
   const [blacklisting, setBlacklisting] = useState(false)
   const [confirmBlacklist, setConfirmBlacklist] = useState(false)
@@ -24,6 +28,8 @@ export default function AliasModal({ unknownItem, onResolved, onSkip, onBlacklis
     setSelected(null)
     setNewName('')
     setNewCategory('')
+    setNewSize('')
+    setNewSizeUnit('oz')
     setConfirmBlacklist(false)
   }, [unknownItem?.description])
 
@@ -45,7 +51,7 @@ export default function AliasModal({ unknownItem, onResolved, onSkip, onBlacklis
     if (!newName.trim()) return
     setLoading(true)
     try {
-      const id = await createProduct({ name: newName.trim(), category: newCategory, aliases: [unknownItem.description] })
+      const id = await createProduct({ name: newName.trim(), category: newCategory, aliases: [unknownItem.description], defaultSize: newSize ? parseFloat(newSize) : null, defaultUnit: newSize ? newSizeUnit : '' })
       onResolved({ ...unknownItem, productId: id, productName: newName.trim() })
     } finally { setLoading(false) }
   }
@@ -138,7 +144,19 @@ export default function AliasModal({ unknownItem, onResolved, onSkip, onBlacklis
                 {CATEGORIES.map(c => <option key={c} value={c}>{CATEGORY_ICONS[c]} {c}</option>)}
               </select>
             </div>
-            <p style={{ fontSize: '0.8rem', color: 'var(--ink-faint)' }}>"{unknownItem.description}" will be saved as an alias.</p>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+              <div className="form-group" style={{ marginBottom:0 }}>
+                <label className="form-label">Default Size <span style={{ color:'var(--ink-faint)', fontWeight:400 }}>(optional)</span></label>
+                <input className="form-input" type="number" step="0.01" min="0" placeholder="e.g. 18" value={newSize} onChange={e => setNewSize(e.target.value)} />
+              </div>
+              <div className="form-group" style={{ marginBottom:0 }}>
+                <label className="form-label">Unit</label>
+                <select className="form-select" value={newSizeUnit} onChange={e => setNewSizeUnit(e.target.value)}>
+                  {SIZE_UNITS.map(u => <option key={u} value={u}>{u}</option>)}
+                </select>
+              </div>
+            </div>
+            <p style={{ fontSize: '0.78rem', color: 'var(--ink-faint)', marginTop: 8 }}>"{unknownItem.description}" will be saved as an alias. Size helps compare price per oz across different package sizes.</p>
           </>
         )}
 
