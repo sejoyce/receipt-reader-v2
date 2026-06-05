@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { UploadCloud, CheckCircle, AlertCircle, Scale, Plus, ChevronDown, ChevronUp, Pencil, Check, X } from 'lucide-react'
-import { extractTextFromImage, parseReceiptText, extractWithClaude, detectDateFromText } from '../lib/ocr'
+import { extractTextFromImage, parseReceiptText, extractWithClaude, detectDateFromText, checkImageQuality } from '../lib/ocr'
 import { findProductByAlias, getOrCreateStore, saveReceipt, detectStoreFromText, getBlacklist, getAllProducts } from '../lib/db'
 import { CATEGORIES, CATEGORY_ICONS } from '../lib/categories'
 import { useAuth } from '../hooks/useAuth'
@@ -11,13 +11,25 @@ import { useToast } from '../hooks/useToast'
 const SIZE_UNITS = ['oz', 'lb', 'kg', 'g', 'ml', 'l', 'fl oz', 'ct', 'pk']
 
 function SizeDisplay({ item }) {
-  if (item.weight && item.pricePerUnit) {
+  if (item.weight && item.unit && item.weight > 0) {
+    // Sold by weight (bananas etc)
+    const ppu = item.pricePerUnit || (item.price / item.weight)
     const poz = (item.price / (item.weight * (item.unit === 'lb' ? 16 : 1))).toFixed(3)
     return (
       <span style={{ fontSize:'0.78rem', color:'var(--ink-light)' }}>
         <Scale size={11} style={{ display:'inline', marginRight:3, verticalAlign:'middle' }} />
-        {item.weight} {item.unit} @ ${item.pricePerUnit.toFixed(2)}/{item.unit}
+        {item.weight} {item.unit} @ ${ppu.toFixed(2)}/{item.unit}
         <span style={{ color:'var(--green)', marginLeft:6, fontWeight:600 }}>${poz}/oz</span>
+      </span>
+    )
+  }
+  if (item.quantity > 1) {
+    // Multi-quantity item (e.g. 2 @ 1.99)
+    const unitPrice = item.pricePerUnit || (item.price / item.quantity)
+    return (
+      <span style={{ fontSize:'0.78rem', color:'var(--ink-light)' }}>
+        {item.quantity} × ${unitPrice.toFixed(2)}
+        <span style={{ color:'var(--green)', marginLeft:6, fontWeight:600 }}>${item.price.toFixed(2)} total</span>
       </span>
     )
   }
@@ -32,7 +44,6 @@ function SizeDisplay({ item }) {
       </span>
     )
   }
-  if (item.quantity > 1) return <span style={{ fontSize:'0.78rem', color:'var(--ink-light)' }}>×{item.quantity}</span>
   return <span style={{ fontSize:'0.78rem', color:'var(--ink-faint)' }}>—</span>
 }
 
@@ -85,23 +96,37 @@ export default function UploadReceipt() {
   // Which row is currently showing the inline size editor
   const [editingSizeIdx, setEditingSizeIdx] = useState(null)
 
+  const [qualityWarnings, setQualityWarnings] = useState([])
+  const [checkingQuality, setCheckingQuality] = useState(false)
+
   // Manual add item panel
   const [showAddItem, setShowAddItem] = useState(false)
   const [allProducts, setAllProducts] = useState([])
   const [newItem, setNewItem] = useState({ productId:'', productName:'', price:'', packageSize:'', packageUnit:'oz', quantity:1 })
   const [productSearch, setProductSearch] = useState('')
 
-  function handleFileChange(e) {
+  async function handleFileChange(e) {
     const file = e.target.files?.[0]
     if (!file) return
     setImageFile(file); setImagePreview(URL.createObjectURL(file))
     setStoreAutoDetected(false); setDateAutoDetected(false)
+    setQualityWarnings([])
+    setCheckingQuality(true)
+    const warnings = await checkImageQuality(file)
+    setQualityWarnings(warnings)
+    setCheckingQuality(false)
   }
 
-  function handleDrop(e) {
+  async function handleDrop(e) {
     e.preventDefault()
     const file = e.dataTransfer.files?.[0]
-    if (file?.type.startsWith('image/')) { setImageFile(file); setImagePreview(URL.createObjectURL(file)) }
+    if (!file?.type.startsWith('image/')) return
+    setImageFile(file); setImagePreview(URL.createObjectURL(file))
+    setQualityWarnings([])
+    setCheckingQuality(true)
+    const warnings = await checkImageQuality(file)
+    setQualityWarnings(warnings)
+    setCheckingQuality(false)
   }
 
   async function processReceipt() {
@@ -281,6 +306,33 @@ export default function UploadReceipt() {
               : <><UploadCloud size={36} color="var(--ink-faint)" style={{ marginBottom:12 }} /><p style={{ fontWeight:600, marginBottom:4 }}>Drop receipt image here</p><p style={{ fontSize:'0.8rem', color:'var(--ink-faint)' }}>or click to browse · JPG, PNG, WEBP</p></>}
           </div>
           <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={handleFileChange} style={{ display:'none' }} />
+          {/* Quality warnings */}
+          {checkingQuality && (
+            <div style={{ display:'flex', alignItems:'center', gap:8, fontSize:'0.82rem', color:'var(--ink-faint)', marginBottom:12 }}>
+              <div className="spinner" style={{ width:14, height:14, borderWidth:2 }} /> Checking image quality…
+            </div>
+          )}
+          {qualityWarnings.length > 0 && (
+            <div style={{ background:'#fef9ec', border:'1.5px solid #f5c842', borderRadius:'var(--radius-sm)', padding:'12px 16px', marginBottom:16 }}>
+              <div style={{ fontWeight:600, fontSize:'0.82rem', color:'#7a5c00', marginBottom:8, display:'flex', alignItems:'center', gap:6 }}>
+                ⚠ Image quality tips
+              </div>
+              {qualityWarnings.map((w, i) => (
+                <div key={i} style={{ fontSize:'0.8rem', color:'#5a4200', marginBottom: i < qualityWarnings.length-1 ? 4 : 0, paddingLeft:4 }}>
+                  • {w}
+                </div>
+              ))}
+              <div style={{ fontSize:'0.75rem', color:'#8a7030', marginTop:10, borderTop:'1px solid #f0d860', paddingTop:8 }}>
+                <strong>Best practices:</strong> Lay the receipt flat on a dark surface · Shoot straight down · Use good lighting, no flash glare · Make sure all lines are in frame · Crop tightly to just the receipt
+              </div>
+            </div>
+          )}
+          {imageFile && qualityWarnings.length === 0 && !checkingQuality && (
+            <div style={{ display:'flex', alignItems:'center', gap:6, fontSize:'0.8rem', color:'var(--green)', marginBottom:12, fontWeight:500 }}>
+              ✓ Image looks good
+            </div>
+          )}
+
           <div className="form-group" style={{ marginBottom:16 }}>
             <label className="form-label">Extraction Method</label>
             <select className="form-select" value={ocrMethod} onChange={e=>setOcrMethod(e.target.value)}>
