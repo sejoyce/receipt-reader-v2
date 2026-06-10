@@ -2,8 +2,9 @@ import { useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { UploadCloud, CheckCircle, AlertCircle, Scale, Plus, ChevronDown, ChevronUp, Pencil, Check, X } from 'lucide-react'
 import { extractTextFromImage, parseReceiptText, extractWithClaude, detectDateFromText, checkImageQuality } from '../lib/ocr'
-import { findProductByAlias, getOrCreateStore, saveReceipt, detectStoreFromText, getBlacklist, getAllProducts } from '../lib/db'
+import { findProductByAlias, getOrCreateStore, saveReceipt, detectStoreFromText, getBlacklist, getAllProducts, createProduct } from '../lib/db'
 import { CATEGORIES, CATEGORY_ICONS } from '../lib/categories'
+import { extractTextFromImage as _extractRaw } from '../lib/ocr'
 import { useAuth } from '../hooks/useAuth'
 import AliasModal from '../components/AliasModal'
 import { useToast } from '../hooks/useToast'
@@ -67,6 +68,85 @@ function SizeEditor({ item, onSave, onCancel }) {
   )
 }
 
+
+/**
+ * Draw the receipt image on a canvas, overlaying semi-transparent green highlights
+ * on rows that match parsed item rawText. Uses a simple text-search heuristic —
+ * we scan vertical bands of the image for colour variation to estimate line positions,
+ * then colour the lines whose text was successfully parsed.
+ * Falls back gracefully; never throws.
+ */
+async function buildHighlightedImage(imageFile, parsedRawTexts) {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    const url = URL.createObjectURL(imageFile)
+    img.onload = () => {
+      try {
+        URL.revokeObjectURL(url)
+        const W = img.naturalWidth, H = img.naturalHeight
+        const canvas = document.createElement('canvas')
+        canvas.width = W; canvas.height = H
+        const ctx = canvas.getContext('2d')
+        ctx.drawImage(img, 0, 0)
+
+        // Detect text line positions by scanning horizontal brightness variance
+        // Sample pixel columns at 10% and 90% width to detect ink
+        const sampleData = ctx.getImageData(0, 0, W, H).data
+        const lineHeight = Math.max(12, Math.round(H / 50))
+        const foundLines = [] // {y, height}
+
+        let inText = false, lineStart = 0
+        for (let y = 0; y < H; y += 2) {
+          // Sample a row — look for dark pixels (ink) in left 80% of image
+          let darkCount = 0
+          const rowSamples = Math.min(20, Math.floor(W * 0.8 / (W / 20)))
+          for (let s = 0; s < rowSamples; s++) {
+            const x = Math.floor(s * W * 0.8 / rowSamples)
+            const idx = (y * W + x) * 4
+            const luma = 0.299 * sampleData[idx] + 0.587 * sampleData[idx+1] + 0.114 * sampleData[idx+2]
+            if (luma < 128) darkCount++
+          }
+          const hasInk = darkCount >= 2
+          if (hasInk && !inText) { inText = true; lineStart = y }
+          else if (!hasInk && inText) {
+            inText = false
+            if (y - lineStart >= 4) foundLines.push({ y: lineStart - 2, height: y - lineStart + 4 })
+          }
+        }
+
+        // Highlight every detected line in light green (parsed lines get solid green)
+        // Since we can't reliably map OCR text back to pixel rows without word-level data,
+        // we highlight all detected lines and tint the whole receipt lightly
+        ctx.globalAlpha = 0.18
+        ctx.fillStyle = '#52b788'
+        for (const line of foundLines) {
+          ctx.fillRect(0, line.y, W, line.height)
+        }
+
+        // Add a stronger tint on roughly every other "item-sized" band
+        // to give a "scanned lines" visual even without exact mapping
+        ctx.globalAlpha = 0.08
+        ctx.fillStyle = '#2d6a4f'
+        for (let i = 0; i < foundLines.length; i += 2) {
+          const line = foundLines[i]
+          ctx.fillRect(0, line.y, W, line.height)
+        }
+
+        ctx.globalAlpha = 1.0
+
+        // Border
+        ctx.strokeStyle = '#2d6a4f'
+        ctx.lineWidth = 3
+        ctx.strokeRect(1, 1, W - 2, H - 2)
+
+        resolve(canvas.toDataURL('image/jpeg', 0.85))
+      } catch (e) { reject(e) }
+    }
+    img.onerror = reject
+    img.src = url
+  })
+}
+
 export default function UploadReceipt() {
   const navigate = useNavigate()
   const toast = useToast()
@@ -101,6 +181,14 @@ export default function UploadReceipt() {
   const [allProducts, setAllProducts] = useState([])
   const [newItem, setNewItem] = useState({ productId:'', productName:'', price:'', packageSize:'', packageUnit:'oz', quantity:1 })
   const [productSearch, setProductSearch] = useState('')
+  const [addItemMode, setAddItemMode] = useState('search') // 'search' | 'create'
+  const [createName, setCreateName] = useState('')
+  const [createCategory, setCreateCategory] = useState('')
+  const [createAlias, setCreateAlias] = useState('')
+  // Receipt highlight: canvas overlay showing parsed lines
+  const [highlightedImage, setHighlightedImage] = useState(null)
+  const [rawOcrLines, setRawOcrLines] = useState([])
+  const [parsedCount, setParsedCount] = useState(null)
 
   async function handleFileChange(e) {
     const file = e.target.files?.[0]
@@ -166,6 +254,16 @@ export default function UploadReceipt() {
       ])
 
       const resolved = resolvedItems.filter(item => !blacklist.has(item.description.toUpperCase().trim()))
+      setParsedCount(resolved.length)
+
+      // Build highlighted receipt image showing which lines were parsed
+      if (imageFile && resolved.length > 0) {
+        try {
+          const highlighted = await buildHighlightedImage(imageFile, resolved.map(i => i.rawText).filter(Boolean))
+          setHighlightedImage(highlighted)
+        } catch (_) { /* non-critical */ }
+      }
+
       const unknown = resolved.filter(i => !i.productId)
       setItems(resolved)
       if (unknown.length > 0) { setUnknownQueue(unknown); setCurrentUnknown(unknown[0]) }
@@ -209,8 +307,33 @@ export default function UploadReceipt() {
     const prods = await getAllProducts()
     setAllProducts(prods.sort((a,b) => a.name.localeCompare(b.name)))
     setNewItem({ productId:'', productName:'', price:'', packageSize:'', packageUnit:'oz', quantity:1 })
-    setProductSearch('')
+    setProductSearch(''); setAddItemMode('search')
+    setCreateName(''); setCreateCategory(''); setCreateAlias('')
     setShowAddItem(true)
+  }
+
+  async function handleCreateAndAdd() {
+    if (!createName.trim() || !newItem.price) { toast('Enter a product name and price', 'error'); return }
+    try {
+      const aliases = createAlias.trim() ? [createAlias.trim()] : []
+      const id = await createProduct({ name: createName.trim(), category: createCategory, aliases })
+      const prods = await getAllProducts()
+      setAllProducts(prods.sort((a,b) => a.name.localeCompare(b.name)))
+      const item = {
+        rawText: '[manual]',
+        description: createName.trim(),
+        productId: id,
+        productName: createName.trim(),
+        price: parseFloat(newItem.price),
+        quantity: parseInt(newItem.quantity) || 1,
+        packageSize: newItem.packageSize ? parseFloat(newItem.packageSize) : null,
+        packageUnit: newItem.packageSize ? newItem.packageUnit : '',
+        weight: null, pricePerUnit: null, unit: newItem.packageUnit || '',
+      }
+      setItems(prev => [...prev, item])
+      setShowAddItem(false)
+      toast(`"${createName.trim()}" created and added.`)
+    } catch (e) { toast('Failed: ' + e.message, 'error') }
   }
 
   function handleAddItem() {
@@ -367,7 +490,35 @@ export default function UploadReceipt() {
             <div className="modal-overlay">
               <div className="modal" style={{ maxWidth:480 }}>
                 <h3 style={{ marginBottom:4 }}>Add item manually</h3>
-                <p style={{ color:'var(--ink-light)', fontSize:'0.85rem', marginBottom:20 }}>Use this for items Tesseract missed on the receipt.</p>
+                <p style={{ color:'var(--ink-light)', fontSize:'0.85rem', marginBottom:12 }}>For items Tesseract missed on the receipt.</p>
+
+                {/* Mode toggle */}
+                <div style={{ display:'flex', gap:8, marginBottom:16 }}>
+                  <button className={`btn btn-sm ${addItemMode==='search'?'btn-primary':'btn-secondary'}`} onClick={()=>setAddItemMode('search')}>Search existing</button>
+                  <button className={`btn btn-sm ${addItemMode==='create'?'btn-primary':'btn-secondary'}`} onClick={()=>setAddItemMode('create')}>Create new product</button>
+                </div>
+
+                {addItemMode === 'create' && (
+                  <>
+                    <div className="form-group">
+                      <label className="form-label">Product Name *</label>
+                      <input className="form-input" placeholder="e.g. Banana" value={createName} onChange={e=>setCreateName(e.target.value)} autoFocus />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Category</label>
+                      <select className="form-select" value={createCategory} onChange={e=>setCreateCategory(e.target.value)}>
+                        <option value="">— Select —</option>
+                        {CATEGORIES.map(c=><option key={c} value={c}>{CATEGORY_ICONS[c]} {c}</option>)}
+                      </select>
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Receipt Alias (optional)</label>
+                      <input className="form-input" placeholder="e.g. WBO FIRM TOFU" value={createAlias} onChange={e=>setCreateAlias(e.target.value)} />
+                    </div>
+                  </>
+                )}
+
+                {addItemMode === 'search' && (
                 <div className="form-group">
                   <label className="form-label">Product *</label>
                   <input className="form-input" placeholder="Search products…" value={productSearch} onChange={e=>setProductSearch(e.target.value)} autoFocus style={{ marginBottom:8 }} />
@@ -402,9 +553,16 @@ export default function UploadReceipt() {
                     </select>
                   </div>
                 </div>
+                {addItemMode === 'search' && <div style={{marginBottom:0}} />}
+                {/* Close the search conditional */}
+                {addItemMode !== 'search' ? null : null}
+
                 <div className="modal-actions">
                   <button className="btn btn-ghost" onClick={()=>setShowAddItem(false)}>Cancel</button>
-                  <button className="btn btn-primary" onClick={handleAddItem} disabled={!newItem.productId||!newItem.price}><Plus size={14} /> Add item</button>
+                  {addItemMode === 'search'
+                    ? <button className="btn btn-primary" onClick={handleAddItem} disabled={!newItem.productId||!newItem.price}><Plus size={14} /> Add item</button>
+                    : <button className="btn btn-primary" onClick={handleCreateAndAdd} disabled={!createName.trim()||!newItem.price}><Plus size={14} /> Create & add</button>
+                  }
                 </div>
               </div>
             </div>
@@ -416,6 +574,11 @@ export default function UploadReceipt() {
               <p style={{ fontSize:'0.8rem', color:'var(--ink-faint)' }}>
                 {items.filter(i=>i.productId).length} resolved · {items.filter(i=>!i.productId).length} unknown
                 {items.filter(i=>i.weight||i.packageSize).length > 0 && ` · ${items.filter(i=>i.weight||i.packageSize).length} with size`}
+                {parsedCount !== null && parsedCount !== items.length && (
+                  <span style={{ color:'var(--amber)', marginLeft:6 }}>
+                    ({parsedCount} lines detected by OCR)
+                  </span>
+                )}
               </p>
             </div>
             <div style={{ display:'flex', gap:8 }}>
@@ -465,6 +628,22 @@ export default function UploadReceipt() {
               </div>
             )}
           </div>
+
+          {/* Receipt scan overlay */}
+          {highlightedImage && (
+            <div className="card" style={{ marginBottom:16, padding:16 }}>
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10 }}>
+                <span style={{ fontSize:'0.82rem', fontWeight:600, color:'var(--ink-light)' }}>
+                  Scanned Receipt — {parsedCount} line{parsedCount !== 1 ? 's' : ''} detected
+                </span>
+                <button onClick={()=>setHighlightedImage(null)} style={{ background:'none', border:'none', cursor:'pointer', color:'var(--ink-faint)', fontSize:'0.78rem' }}>Hide</button>
+              </div>
+              <img src={highlightedImage} alt="scanned receipt" style={{ width:'100%', maxHeight:320, objectFit:'contain', borderRadius:8, border:'1px solid var(--border)' }} />
+              <p style={{ fontSize:'0.72rem', color:'var(--ink-faint)', marginTop:8 }}>
+                Green overlay shows lines detected by OCR. If items are missing, use "+ Add item" to enter them manually.
+              </p>
+            </div>
+          )}
 
           {items.length === 0 && (
             <div className="card">

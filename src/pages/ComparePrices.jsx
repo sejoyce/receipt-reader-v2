@@ -63,7 +63,7 @@ export default function ComparePrices() {
   const [chartData, setChartData] = useState([])
   const [stores, setStores] = useState([])
   const [loading, setLoading] = useState(false)
-  const [compareMode, setCompareMode] = useState('total') // 'total' | 'perUnit'
+  const [compareMode, setCompareMode] = useState('perUnit') // 'total' | 'perUnit'
 
   useEffect(() => { getAllProducts().then(setProducts) }, [])
 
@@ -98,6 +98,12 @@ export default function ComparePrices() {
   }
   const dominantUnit = Object.entries(unitCounts).sort((a,b) => b[1]-a[1])[0]?.[0] || null
   const hasPPU = history.some(e => effectivePPU(e, selectedProduct) != null)
+  // Total price comparison is only meaningful for items without a natural size unit
+  // (e.g. a fixed-price item like a jar of miso that always comes in one size)
+  // For by-weight or variable-size items, total price is misleading
+  const totalMakesSense = !hasPPU || history.every(e =>
+    !e.weight && !e.packageSize && !selectedProduct?.defaultSize
+  )
 
   // Per-store summary
   const storeStats = stores.map((store, i) => {
@@ -182,7 +188,9 @@ export default function ComparePrices() {
           {/* Compare mode toggle — label shows the actual unit */}
           {hasPPU && (
             <div style={{ display:'flex', gap:8, marginBottom:20, alignItems:'center', flexWrap:'wrap' }}>
-              <button className={`btn btn-sm ${compareMode==='total'?'btn-primary':'btn-secondary'}`} onClick={()=>setCompareMode('total')}>Total Price</button>
+              {totalMakesSense && (
+                <button className={`btn btn-sm ${compareMode==='total'?'btn-primary':'btn-secondary'}`} onClick={()=>setCompareMode('total')}>Total Price</button>
+              )}
               <button className={`btn btn-sm ${compareMode==='perUnit'?'btn-primary':'btn-secondary'}`} onClick={()=>setCompareMode('perUnit')}>
                 Price per {dominantUnit || 'unit'}
               </button>
@@ -207,7 +215,11 @@ export default function ComparePrices() {
                   )}
                 </div>
               </div>
-              <div style={{ fontFamily:'DM Serif Display, serif', fontSize:'2.2rem', color:'var(--green)' }}>${bestStore.minTotal.toFixed(2)}</div>
+              <div style={{ fontFamily:'DM Serif Display, serif', fontSize:'2.2rem', color:'var(--green)' }}>
+                {!totalMakesSense && bestStore.minPPU != null
+                  ? ppuLabel(bestStore.minPPU, bestStore.unit)
+                  : `$${bestStore.minTotal.toFixed(2)}`}
+              </div>
             </div>
           )}
 
@@ -219,9 +231,9 @@ export default function ComparePrices() {
                 <thead>
                   <tr>
                     <th>Store</th>
-                    <th>Avg Price</th>
-                    <th>Lowest</th>
-                    <th>Highest</th>
+                    {totalMakesSense && <th>Avg Price</th>}
+                    {totalMakesSense && <th>Lowest</th>}
+                    {totalMakesSense && <th>Highest</th>}
                     {hasPPU && <th>Best /{dominantUnit||'unit'}</th>}
                     {hasPPU && <th>Avg /{dominantUnit||'unit'}</th>}
                     <th>Size</th>
@@ -238,9 +250,9 @@ export default function ComparePrices() {
                           {i===0 && <span className="badge badge-green" style={{ fontSize:'0.65rem' }}>Cheapest</span>}
                         </div>
                       </td>
-                      <td>${s.avgTotal.toFixed(2)}</td>
-                      <td style={{ color:'var(--green)', fontWeight:600 }}>${s.minTotal.toFixed(2)}</td>
-                      <td style={{ color:'var(--amber)' }}>${s.maxTotal.toFixed(2)}</td>
+                      {totalMakesSense && <td>${s.avgTotal.toFixed(2)}</td>}
+                      {totalMakesSense && <td style={{ color:'var(--green)', fontWeight:600 }}>${s.minTotal.toFixed(2)}</td>}
+                      {totalMakesSense && <td style={{ color:'var(--amber)' }}>${s.maxTotal.toFixed(2)}</td>}
                       {hasPPU && (
                         <td style={{ color:'var(--green)', fontWeight:600, fontSize:'0.82rem' }}>
                           {s.minPPU != null ? ppuLabel(s.minPPU, s.unit) : '—'}

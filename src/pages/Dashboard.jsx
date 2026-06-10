@@ -31,7 +31,13 @@ export default function Dashboard() {
   return (
     <div className="animate-fade">
       <div className="page-header">
-        <h2>Good morning 🛒</h2>
+        <h2>{(() => {
+          const h = new Date().getHours()
+          if (h < 12) return 'Good morning 🛒'
+          if (h < 17) return 'Good afternoon 🛒'
+          if (h < 21) return 'Good evening 🛒'
+          return 'Good night 🛒'
+        })()}</h2>
         <p>Track prices across your favorite stores and never overpay again.</p>
       </div>
 
