@@ -16,48 +16,44 @@ function toDate(val) {
   return new Date(val)
 }
 
-const UNIT_TO_OZ = { oz:1, lb:16, lbs:16, g:0.03527, kg:35.274, 'fl oz':1, ml:0.03381, l:33.814, ct:1, pk:1 }
-
-function toOz(size, unit) {
-  if (!size || !unit) return null
-  const factor = UNIT_TO_OZ[unit.toLowerCase().replace('lbs','lb')] || 1
-  return size * factor
+/**
+ * Return the natural unit for an entry for per-unit comparison.
+ * We do NOT convert across units — only compare same-unit entries.
+ */
+function getEntryUnit(entry, product) {
+  // By-weight items: pricePerUnit already is $/unit (e.g. $/lb)
+  if (entry.pricePerUnit && entry.unit) return entry.unit.toLowerCase()
+  // Fixed package: use packageUnit
+  if (entry.packageSize && entry.packageUnit) return entry.packageUnit.toLowerCase()
+  // Fall back to product defaultUnit
+  if (product?.defaultUnit) return product.defaultUnit.toLowerCase()
+  return null
 }
 
 /**
- * Given a price history entry + product default size,
- * return the effective price-per-oz for comparison.
+ * Return price-per-unit in the item's natural unit.
+ * $/lb for bananas, $/oz for 18oz blueberries, $/lb for 1lb strawberries, etc.
  */
-function effectivePPO(entry, product) {
-  // By-weight: $/lb → $/oz
-  if (entry.pricePerUnit && entry.unit) {
-    const oz = toOz(1, entry.unit)
-    return oz ? entry.pricePerUnit / oz : null
-  }
-  // Fixed package size recorded on the entry
-  if (entry.packageSize && entry.packageUnit) {
-    const oz = toOz(entry.packageSize, entry.packageUnit)
-    return oz ? entry.price / oz : null
-  }
-  // Fall back to product's defaultSize
-  if (product?.defaultSize && product?.defaultUnit) {
-    const oz = toOz(product.defaultSize, product.defaultUnit)
-    return oz ? entry.price / oz : null
-  }
+function effectivePPU(entry, product) {
+  // By-weight: pricePerUnit is already $/unit
+  if (entry.pricePerUnit && entry.unit) return entry.pricePerUnit
+  // Fixed package: price / packageSize
+  if (entry.packageSize && entry.packageUnit) return entry.price / entry.packageSize
+  // Fall back to product defaultSize
+  if (product?.defaultSize && product?.defaultUnit) return entry.price / product.defaultSize
   return null
 }
 
 function sizeLabel(entry, product) {
-  if (entry.weight && entry.unit) return `${entry.weight} ${entry.unit} (by wt)`
+  if (entry.weight && entry.unit) return `${entry.weight} ${entry.unit}`
   if (entry.packageSize && entry.packageUnit) return `${entry.packageSize} ${entry.packageUnit}`
   if (product?.defaultSize && product?.defaultUnit) return `${product.defaultSize} ${product.defaultUnit} (default)`
   return null
 }
 
-function ppoLabel(ppo, entry) {
-  if (ppo == null) return '—'
-  if (entry?.pricePerUnit && entry?.unit) return `$${entry.pricePerUnit.toFixed(2)}/${entry.unit}`
-  return `$${ppo.toFixed(3)}/oz`
+function ppuLabel(ppu, unit) {
+  if (ppu == null || !unit) return '—'
+  return `$${ppu.toFixed(2)}/${unit}`
 }
 
 export default function ComparePrices() {
@@ -67,7 +63,7 @@ export default function ComparePrices() {
   const [chartData, setChartData] = useState([])
   const [stores, setStores] = useState([])
   const [loading, setLoading] = useState(false)
-  const [compareMode, setCompareMode] = useState('total') // 'total' | 'perOz'
+  const [compareMode, setCompareMode] = useState('total') // 'total' | 'perUnit'
 
   useEffect(() => { getAllProducts().then(setProducts) }, [])
 
@@ -79,7 +75,6 @@ export default function ComparePrices() {
       const storeNames = [...new Set(entries.map(e => e.storeName))]
       setStores(storeNames)
 
-      // Build time-series chart data keyed by date
       const byDate = {}
       for (const entry of entries) {
         const d = toDate(entry.date)
@@ -87,54 +82,69 @@ export default function ComparePrices() {
         const key = format(d, 'yyyy-MM-dd')
         if (!byDate[key]) byDate[key] = { date: key, displayDate: format(d, 'MMM d, yy') }
         byDate[key][entry.storeName + '_total'] = entry.price
-        const ppo = effectivePPO(entry, selectedProduct)
-        if (ppo != null) byDate[key][entry.storeName + '_ppo'] = parseFloat(ppo.toFixed(5))
+        const ppu = effectivePPU(entry, selectedProduct)
+        if (ppu != null) byDate[key][entry.storeName + '_ppu'] = parseFloat(ppu.toFixed(4))
       }
       setChartData(Object.values(byDate).sort((a,b) => a.date.localeCompare(b.date)))
       setLoading(false)
     })
   }, [selectedProduct])
 
-  const hasPPO = history.some(e => effectivePPO(e, selectedProduct) != null)
+  // Determine the dominant unit across all entries for the toggle label
+  const unitCounts = {}
+  for (const e of history) {
+    const u = getEntryUnit(e, selectedProduct)
+    if (u) unitCounts[u] = (unitCounts[u] || 0) + 1
+  }
+  const dominantUnit = Object.entries(unitCounts).sort((a,b) => b[1]-a[1])[0]?.[0] || null
+  const hasPPU = history.some(e => effectivePPU(e, selectedProduct) != null)
 
   // Per-store summary
   const storeStats = stores.map((store, i) => {
     const entries = history.filter(e => e.storeName === store)
     const prices = entries.map(e => e.price)
-    const ppoVals = entries.map(e => effectivePPO(e, selectedProduct)).filter(v => v != null)
+    const ppuVals = entries.map(e => effectivePPU(e, selectedProduct)).filter(v => v != null)
     const latest = entries[entries.length - 1]
+    const latestUnit = latest ? getEntryUnit(latest, selectedProduct) : null
+    const latestPPU = latest ? effectivePPU(latest, selectedProduct) : null
     return {
       store, color: STORE_COLORS[i % STORE_COLORS.length],
       count: entries.length,
       avgTotal: prices.reduce((a,b)=>a+b,0) / prices.length,
       minTotal: Math.min(...prices),
       maxTotal: Math.max(...prices),
-      avgPPO: ppoVals.length ? ppoVals.reduce((a,b)=>a+b,0)/ppoVals.length : null,
-      minPPO: ppoVals.length ? Math.min(...ppoVals) : null,
+      avgPPU: ppuVals.length ? ppuVals.reduce((a,b)=>a+b,0)/ppuVals.length : null,
+      minPPU: ppuVals.length ? Math.min(...ppuVals) : null,
       latestSize: latest ? sizeLabel(latest, selectedProduct) : null,
-      latestPPOLabel: latest ? ppoLabel(effectivePPO(latest, selectedProduct), latest) : '—',
+      latestPPULabel: ppuLabel(latestPPU, latestUnit),
+      unit: latestUnit,
     }
   }).sort((a,b) => a.avgTotal - b.avgTotal)
 
-  // Bar chart data: all individual entries sorted by price, grouped by store+size
-  const barData = history
-    .map(e => ({
-      label: `${e.storeName}${sizeLabel(e, selectedProduct) ? ' · ' + sizeLabel(e, selectedProduct) : ''}`,
-      store: e.storeName,
-      total: e.price,
-      ppo: effectivePPO(e, selectedProduct),
-      size: sizeLabel(e, selectedProduct),
-      date: toDate(e.date) ? format(toDate(e.date), 'MMM d, yy') : '',
-    }))
-    .sort((a,b) => (compareMode === 'perOz' ? (a.ppo||999)-(b.ppo||999) : a.total-b.total))
-
   const bestStore = storeStats[0]
+
+  // Bar chart data
+  const barData = history
+    .map(e => {
+      const unit = getEntryUnit(e, selectedProduct)
+      const ppu = effectivePPU(e, selectedProduct)
+      return {
+        label: `${e.storeName}${sizeLabel(e, selectedProduct) ? ' · ' + sizeLabel(e, selectedProduct) : ''}`,
+        store: e.storeName,
+        total: e.price,
+        ppu,
+        unit,
+        size: sizeLabel(e, selectedProduct),
+        date: toDate(e.date) ? format(toDate(e.date), 'MMM d, yy') : '',
+      }
+    })
+    .sort((a,b) => compareMode === 'perUnit' ? (a.ppu||999)-(b.ppu||999) : a.total-b.total)
 
   return (
     <div className="animate-fade">
       <div className="page-header">
         <h2>Compare Prices</h2>
-        <p>Price history across stores, with per-oz comparison for sized products.</p>
+        <p>Price history across stores, with per-unit comparison for sized products.</p>
       </div>
 
       <div className="card" style={{ marginBottom: 24 }}>
@@ -169,14 +179,16 @@ export default function ComparePrices() {
 
       {selectedProduct && !loading && history.length > 0 && (
         <>
-          {/* Compare mode toggle */}
-          {hasPPO && (
-            <div style={{ display:'flex', gap:8, marginBottom:20, alignItems:'center' }}>
+          {/* Compare mode toggle — label shows the actual unit */}
+          {hasPPU && (
+            <div style={{ display:'flex', gap:8, marginBottom:20, alignItems:'center', flexWrap:'wrap' }}>
               <button className={`btn btn-sm ${compareMode==='total'?'btn-primary':'btn-secondary'}`} onClick={()=>setCompareMode('total')}>Total Price</button>
-              <button className={`btn btn-sm ${compareMode==='perOz'?'btn-primary':'btn-secondary'}`} onClick={()=>setCompareMode('perOz')}>Price per oz</button>
+              <button className={`btn btn-sm ${compareMode==='perUnit'?'btn-primary':'btn-secondary'}`} onClick={()=>setCompareMode('perUnit')}>
+                Price per {dominantUnit || 'unit'}
+              </button>
               {selectedProduct.defaultSize && (
-                <span style={{ fontSize:'0.78rem', color:'var(--ink-faint)', marginLeft:4 }}>
-                  Using default size: {selectedProduct.defaultSize} {selectedProduct.defaultUnit}
+                <span style={{ fontSize:'0.78rem', color:'var(--ink-faint)' }}>
+                  Default size: {selectedProduct.defaultSize} {selectedProduct.defaultUnit}
                 </span>
               )}
             </div>
@@ -190,7 +202,9 @@ export default function ComparePrices() {
                 <div style={{ fontWeight:600 }}>{bestStore.store}</div>
                 <div style={{ fontSize:'0.8rem', color:'var(--ink-light)' }}>
                   avg ${bestStore.avgTotal.toFixed(2)} · low ${bestStore.minTotal.toFixed(2)}
-                  {bestStore.minPPO != null && <> · <span style={{ color:'var(--green)', fontWeight:600 }}>{ppoLabel(bestStore.minPPO, history.find(e=>e.storeName===bestStore.store))}</span></>}
+                  {bestStore.minPPU != null && (
+                    <> · <span style={{ color:'var(--green)', fontWeight:600 }}>{ppuLabel(bestStore.minPPU, bestStore.unit)}</span></>
+                  )}
                 </div>
               </div>
               <div style={{ fontFamily:'DM Serif Display, serif', fontSize:'2.2rem', color:'var(--green)' }}>${bestStore.minTotal.toFixed(2)}</div>
@@ -208,10 +222,10 @@ export default function ComparePrices() {
                     <th>Avg Price</th>
                     <th>Lowest</th>
                     <th>Highest</th>
-                    {hasPPO && <th>Best $/oz</th>}
-                    {hasPPO && <th>Avg $/oz</th>}
+                    {hasPPU && <th>Best /{dominantUnit||'unit'}</th>}
+                    {hasPPU && <th>Avg /{dominantUnit||'unit'}</th>}
                     <th>Size</th>
-                    <th>Records</th>
+                    <th>#</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -227,8 +241,16 @@ export default function ComparePrices() {
                       <td>${s.avgTotal.toFixed(2)}</td>
                       <td style={{ color:'var(--green)', fontWeight:600 }}>${s.minTotal.toFixed(2)}</td>
                       <td style={{ color:'var(--amber)' }}>${s.maxTotal.toFixed(2)}</td>
-                      {hasPPO && <td style={{ color:'var(--green)', fontWeight:600, fontSize:'0.82rem' }}>{s.minPPO != null ? `$${s.minPPO.toFixed(3)}/oz` : '—'}</td>}
-                      {hasPPO && <td style={{ fontSize:'0.82rem', color:'var(--ink-light)' }}>{s.avgPPO != null ? `$${s.avgPPO.toFixed(3)}/oz` : '—'}</td>}
+                      {hasPPU && (
+                        <td style={{ color:'var(--green)', fontWeight:600, fontSize:'0.82rem' }}>
+                          {s.minPPU != null ? ppuLabel(s.minPPU, s.unit) : '—'}
+                        </td>
+                      )}
+                      {hasPPU && (
+                        <td style={{ fontSize:'0.82rem', color:'var(--ink-light)' }}>
+                          {s.avgPPU != null ? ppuLabel(s.avgPPU, s.unit) : '—'}
+                        </td>
+                      )}
                       <td style={{ fontSize:'0.8rem', color:'var(--ink-faint)' }}>{s.latestSize || '—'}</td>
                       <td style={{ color:'var(--ink-faint)' }}>{s.count}</td>
                     </tr>
@@ -238,17 +260,19 @@ export default function ComparePrices() {
             </div>
           </div>
 
-          {/* All entries bar chart — sorted by price */}
+          {/* Bar chart — all individual entries */}
           <div className="card" style={{ marginBottom:24 }}>
             <h3 style={{ fontSize:'1rem', marginBottom:4 }}>
-              {compareMode === 'perOz' ? 'All Records — Sorted by $/oz' : 'All Records — Sorted by Total Price'}
+              {compareMode==='perUnit'
+                ? `All Records — Sorted by $/${dominantUnit||'unit'}`
+                : 'All Records — Sorted by Total Price'}
             </h3>
             <p style={{ fontSize:'0.78rem', color:'var(--ink-faint)', marginBottom:16 }}>Each bar is one purchase. Shorter = cheaper.</p>
-            <ResponsiveContainer width="100%" height={Math.max(180, barData.length * 36)}>
+            <ResponsiveContainer width="100%" height={Math.max(180, barData.length * 38)}>
               <BarChart data={barData} layout="vertical" margin={{ top:0, right:60, left:4, bottom:0 }}>
                 <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="var(--cream-dark)" />
                 <XAxis type="number" tick={{ fontSize:11, fill:'var(--ink-faint)' }} tickLine={false} axisLine={false}
-                  tickFormatter={v => compareMode==='perOz' ? `$${v.toFixed(3)}` : `$${v.toFixed(2)}`} />
+                  tickFormatter={v => `$${parseFloat(v).toFixed(2)}`} />
                 <YAxis type="category" dataKey="label" width={0} tick={false} axisLine={false} tickLine={false} />
                 <Tooltip
                   content={({ active, payload }) => {
@@ -259,13 +283,15 @@ export default function ComparePrices() {
                         <div style={{ fontWeight:600, marginBottom:4 }}>{d.store}</div>
                         <div>Total: <strong>${d.total.toFixed(2)}</strong></div>
                         {d.size && <div>Size: {d.size}</div>}
-                        {d.ppo != null && <div>Per oz: <strong style={{ color:'var(--green)' }}>${d.ppo.toFixed(3)}</strong></div>}
+                        {d.ppu != null && d.unit && (
+                          <div>Per {d.unit}: <strong style={{ color:'var(--green)' }}>{ppuLabel(d.ppu, d.unit)}</strong></div>
+                        )}
                         <div style={{ color:'var(--ink-faint)', fontSize:11, marginTop:4 }}>{d.date}</div>
                       </div>
                     )
                   }}
                 />
-                <Bar dataKey={compareMode==='perOz' ? 'ppo' : 'total'} radius={[0,4,4,0]}>
+                <Bar dataKey={compareMode==='perUnit' ? 'ppu' : 'total'} radius={[0,4,4,0]}>
                   {barData.map((entry, index) => {
                     const storeIdx = stores.indexOf(entry.store)
                     return <Cell key={index} fill={STORE_COLORS[storeIdx % STORE_COLORS.length]} />
@@ -273,7 +299,6 @@ export default function ComparePrices() {
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
-            {/* Legend */}
             <div style={{ display:'flex', flexWrap:'wrap', gap:12, marginTop:12, justifyContent:'center' }}>
               {stores.map((store, i) => (
                 <div key={store} style={{ display:'flex', alignItems:'center', gap:6, fontSize:'0.78rem', color:'var(--ink-light)' }}>
@@ -284,35 +309,42 @@ export default function ComparePrices() {
             </div>
           </div>
 
-          {/* Price over time line chart */}
+          {/* Line chart — price over time */}
           <div className="card">
             <h3 style={{ fontSize:'1rem', marginBottom:20 }}>
-              {compareMode==='perOz' ? 'Price per oz Over Time' : 'Total Price Over Time'}
+              {compareMode==='perUnit'
+                ? `Price per ${dominantUnit||'unit'} Over Time`
+                : 'Total Price Over Time'}
             </h3>
             <ResponsiveContainer width="100%" height={300}>
               <LineChart data={chartData} margin={{ top:5, right:20, left:0, bottom:5 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--cream-dark)" />
                 <XAxis dataKey="displayDate" tick={{ fontSize:11, fill:'var(--ink-faint)' }} tickLine={false} />
                 <YAxis tick={{ fontSize:11, fill:'var(--ink-faint)' }} tickLine={false} axisLine={false}
-                  tickFormatter={v => compareMode==='perOz' ? `$${parseFloat(v).toFixed(3)}` : `$${parseFloat(v).toFixed(2)}`} />
+                  tickFormatter={v => `$${parseFloat(v).toFixed(2)}`} />
                 <Tooltip
                   contentStyle={{ borderRadius:8, border:'1px solid var(--border)', fontSize:13 }}
                   formatter={(v, name) => [
-                    compareMode==='perOz' ? `$${parseFloat(v).toFixed(3)}/oz` : `$${parseFloat(v).toFixed(2)}`,
-                    name.replace(/_total|_ppo/,'')
+                    `$${parseFloat(v).toFixed(2)}${compareMode==='perUnit' && dominantUnit ? '/'+dominantUnit : ''}`,
+                    name.replace(/_total|_ppu/,'')
                   ]}
                 />
-                <Legend wrapperStyle={{ fontSize:12 }} formatter={name => name.replace(/_total|_ppo/,'')} />
+                <Legend wrapperStyle={{ fontSize:12 }} formatter={name => name.replace(/_total|_ppu/,'')} />
                 {stores.map((store, i) => {
-                  const key = store + (compareMode==='perOz' ? '_ppo' : '_total')
+                  const key = store + (compareMode==='perUnit' ? '_ppu' : '_total')
                   if (!chartData.some(d => d[key] != null)) return null
-                  return <Line key={store} type="monotone" dataKey={key} name={key} stroke={STORE_COLORS[i%STORE_COLORS.length]} strokeWidth={2} dot={{ r:4 }} connectNulls activeDot={{ r:6 }} />
+                  return (
+                    <Line key={store} type="monotone" dataKey={key} name={key}
+                      stroke={STORE_COLORS[i%STORE_COLORS.length]} strokeWidth={2}
+                      dot={{ r:4 }} connectNulls activeDot={{ r:6 }} />
+                  )
                 })}
               </LineChart>
             </ResponsiveContainer>
-            {compareMode==='perOz' && (
+            {compareMode==='perUnit' && dominantUnit && (
               <p style={{ fontSize:'0.75rem', color:'var(--ink-faint)', marginTop:12, textAlign:'center' }}>
-                By-weight items use $/lb rate ÷ 16. Fixed packages use total ÷ package size. Product default size used as fallback.
+                Comparing in natural unit: <strong>{dominantUnit}</strong>.
+                By-weight items use their per-{dominantUnit} rate; fixed packages use price ÷ package size.
               </p>
             )}
           </div>

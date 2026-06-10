@@ -12,14 +12,12 @@ const SIZE_UNITS = ['oz', 'lb', 'kg', 'g', 'ml', 'l', 'fl oz', 'ct', 'pk']
 
 function SizeDisplay({ item }) {
   if (item.weight && item.unit && item.weight > 0) {
-    // Sold by weight (bananas etc)
+    // Sold by weight (bananas etc) — show $/natural-unit
     const ppu = item.pricePerUnit || (item.price / item.weight)
-    const poz = (item.price / (item.weight * (item.unit === 'lb' ? 16 : 1))).toFixed(3)
     return (
       <span style={{ fontSize:'0.78rem', color:'var(--ink-light)' }}>
         <Scale size={11} style={{ display:'inline', marginRight:3, verticalAlign:'middle' }} />
         {item.weight} {item.unit} @ ${ppu.toFixed(2)}/{item.unit}
-        <span style={{ color:'var(--green)', marginLeft:6, fontWeight:600 }}>${poz}/oz</span>
       </span>
     )
   }
@@ -33,14 +31,13 @@ function SizeDisplay({ item }) {
       </span>
     )
   }
-  if (item.packageSize) {
-    const factor = item.packageUnit === 'lb' ? 16 : item.packageUnit === 'kg' ? 35.274 : 1
-    const oz = item.packageSize * factor
-    const poz = oz > 0 ? (item.price / oz).toFixed(3) : null
+  if (item.packageSize && item.packageUnit) {
+    // Fixed package — show price per natural unit (e.g. $/oz, $/lb)
+    const ppu = (item.price / item.packageSize).toFixed(2)
     return (
       <span style={{ fontSize:'0.78rem', color:'var(--ink-light)' }}>
         {item.packageSize} {item.packageUnit}
-        {poz && <span style={{ color:'var(--green)', marginLeft:6, fontWeight:600 }}>${poz}/oz</span>}
+        <span style={{ color:'var(--green)', marginLeft:6, fontWeight:600 }}>${ppu}/{item.packageUnit}</span>
       </span>
     )
   }
@@ -50,7 +47,7 @@ function SizeDisplay({ item }) {
 // Inline size editor shown in the review table row
 function SizeEditor({ item, onSave, onCancel }) {
   const [size, setSize] = useState(item.packageSize?.toString() || '')
-  const [unit, setUnit] = useState(item.packageUnit || item.unit || 'oz')
+  const [unit, setUnit] = useState(item.packageUnit || item.unit || '')
   return (
     <div style={{ display:'flex', alignItems:'center', gap:6 }}>
       <input
