@@ -498,6 +498,7 @@ export default function UploadReceipt() {
                   <button className={`btn btn-sm ${addItemMode==='create'?'btn-primary':'btn-secondary'}`} onClick={()=>setAddItemMode('create')}>Create new product</button>
                 </div>
 
+                {/* Create mode fields */}
                 {addItemMode === 'create' && (
                   <>
                     <div className="form-group">
@@ -518,21 +519,27 @@ export default function UploadReceipt() {
                   </>
                 )}
 
+                {/* Search mode fields */}
                 {addItemMode === 'search' && (
-                <div className="form-group">
-                  <label className="form-label">Product *</label>
-                  <input className="form-input" placeholder="Search products…" value={productSearch} onChange={e=>setProductSearch(e.target.value)} autoFocus style={{ marginBottom:8 }} />
-                  <div style={{ maxHeight:180, overflowY:'auto', border:'1px solid var(--border)', borderRadius:8, background:'white' }}>
-                    {filteredProducts.length === 0 && <p style={{ padding:'12px 16px', color:'var(--ink-faint)', fontSize:'0.85rem' }}>No products found — create one on the Products page first.</p>}
-                    {filteredProducts.map(p => (
-                      <button key={p.id} onClick={()=>{ setNewItem(v=>({...v,productId:p.id,productName:p.name})); setProductSearch(p.name) }}
-                        style={{ display:'block', width:'100%', textAlign:'left', padding:'10px 14px', background:newItem.productId===p.id?'var(--green-pale)':'transparent', border:'none', borderBottom:'1px solid var(--cream-dark)', cursor:'pointer', fontSize:'0.875rem' }}>
-                        <div style={{ fontWeight:600 }}>{p.name}</div>
-                        {p.category && <div style={{ fontSize:'0.72rem', color:'var(--ink-faint)' }}>{CATEGORY_ICONS[p.category]} {p.category}</div>}
-                      </button>
-                    ))}
+                  <div className="form-group">
+                    <label className="form-label">Product *</label>
+                    <input className="form-input" placeholder="Search products…" value={productSearch} onChange={e=>setProductSearch(e.target.value)} autoFocus style={{ marginBottom:8 }} />
+                    <div style={{ maxHeight:180, overflowY:'auto', border:'1px solid var(--border)', borderRadius:8, background:'white' }}>
+                      {filteredProducts.length === 0 && (
+                        <p style={{ padding:'12px 16px', color:'var(--ink-faint)', fontSize:'0.85rem' }}>No products found — switch to "Create new product" above.</p>
+                      )}
+                      {filteredProducts.map(p => (
+                        <button key={p.id} onClick={()=>{ setNewItem(v=>({...v,productId:p.id,productName:p.name})); setProductSearch(p.name) }}
+                          style={{ display:'block', width:'100%', textAlign:'left', padding:'10px 14px', background:newItem.productId===p.id?'var(--green-pale)':'transparent', border:'none', borderBottom:'1px solid var(--cream-dark)', cursor:'pointer', fontSize:'0.875rem' }}>
+                          <div style={{ fontWeight:600 }}>{p.name}</div>
+                          {p.category && <div style={{ fontSize:'0.72rem', color:'var(--ink-faint)' }}>{CATEGORY_ICONS[p.category]} {p.category}</div>}
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                </div>
+                )}
+
+                {/* Price / qty / size fields — always shown */}
                 <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginTop:4 }}>
                   <div className="form-group" style={{ marginBottom:0 }}>
                     <label className="form-label">Price *</label>
@@ -553,9 +560,6 @@ export default function UploadReceipt() {
                     </select>
                   </div>
                 </div>
-                {addItemMode === 'search' && <div style={{marginBottom:0}} />}
-                {/* Close the search conditional */}
-                {addItemMode !== 'search' ? null : null}
 
                 <div className="modal-actions">
                   <button className="btn btn-ghost" onClick={()=>setShowAddItem(false)}>Cancel</button>
